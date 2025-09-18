@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700;
+  }
+}
+
+.bg-hero {
+background-image: url('https://images.unsplash.com/photo-1507525428034-b723cf961d3e');
+background-size: cover;
+background-position: center;
+}
