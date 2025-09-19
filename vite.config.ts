@@ -17,12 +17,6 @@ export default defineConfig({
         secure: false,
         // If you need websockets too, uncomment:
         // ws: true,
-        configure: (proxy /*, options*/) => {
-          proxy.on("proxyReq", (proxyReq, req) => {
-            const auth = req.headers["authorization"];
-            if (auth) proxyReq.setHeader("authorization", auth);
-          });
-        },
       },
     },
   },
