@@ -92,13 +92,6 @@ export default function Home() {
         <section className="py-12 flex items-center md:justify-end">
           <div className="w-full max-w-md bg-white/95 backdrop-blur-sm text-slate-900 rounded-2xl shadow-2xl p-6">
             <h2 className="text-xl font-bold mb-1">Login</h2>
-            <p className="text-sm text-slate-600 mb-4">
-              Demo accounts:
-              <br />
-              <b>{DEMO_USERNAME}</b> / <b>{DEMO_PASSWORD}</b> (manual {DEMO_ROLE}) <br />
-              Or use database emails like <b>admin@example.com</b>
-            </p>
-
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Username/Email</label>
