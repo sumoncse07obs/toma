@@ -20,7 +20,7 @@ type Settings = {
   blotato_linkeidin_page_ids?: string[] | null;
 };
 
-const API_BASE = "/api"; // Vite proxy -> http://127.0.0.1:8000
+const API_BASE = "/api"; // Vite proxy -> http://tomaapi.thedrivingtrafficformula.com
 
 export default function SettingsPage() {
   const [loading, setLoading] = React.useState(true);

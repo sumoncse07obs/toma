@@ -1,4 +1,3 @@
-// src/components/customer/BlogContentsDetails.tsx
 import React from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { currentUser, isAuthed, refreshUser, type User } from "@/components/auth";
@@ -64,7 +63,6 @@ type ContentGeneration = {
   updated_at?: string;
 };
 
-/* ========= API base (use your existing auth system) =========*/
 const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`;
 const TOKEN_KEY = "toma_token";
 
@@ -117,14 +115,12 @@ function CopyBtn({ value }: { value: string }) {
   );
 }
 
-/** Utility type: only fields that are string | null */
 type StringFields = {
   [K in keyof ContentGeneration]: ContentGeneration[K] extends string | null ? K : never;
 }[keyof ContentGeneration];
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-/** Reusable auto-saving textarea bound to a single content field */
 function AutoField(props: {
   label: string;
   field: StringFields;
@@ -274,6 +270,10 @@ export default function BlogContentsDetails() {
   const [genImgLoading, setGenImgLoading] = React.useState(false);
   const [genImgErr, setGenImgErr] = React.useState<string | null>(null);
 
+  // Video generation local state
+  const [genVidLoading, setGenVidLoading] = React.useState(false);
+  const [genVidErr, setGenVidErr] = React.useState<string | null>(null);
+
   React.useEffect(() => {
     const currentUserData = currentUser();
     if (currentUserData) {
@@ -328,21 +328,17 @@ export default function BlogContentsDetails() {
     );
   }
 
-  // === Generate Image using your route ===
   async function generateImage() {
     if (!content) return;
-
     try {
       setGenImgErr(null);
       setGenImgLoading(true);
 
-      // Route: POST /customers/{customerId}/contents/{generationId}/make-image
       const resp = await api<any>(
         `/customers/${content.customer_id}/contents/${content.id}/make-image`,
         { method: "POST" }
       );
 
-      // Accept several common shapes
       const newUrl =
         resp?.image_url ??
         resp?.data?.image_url ??
@@ -351,7 +347,6 @@ export default function BlogContentsDetails() {
         null;
 
       if (typeof newUrl === "string" && newUrl.length > 0) {
-        // Update UI immediately
         setContent((prev) =>
           prev
             ? ({
@@ -361,17 +356,53 @@ export default function BlogContentsDetails() {
               } as ContentGeneration)
             : prev
         );
-
-        // If your backend DOESN'T persist the URL itself, uncomment this to force-save:
-        // await saveField("image_url", newUrl);
       } else {
-        // If backend only updated the DB but didn't return the URL, just reload the row
         await loadContent();
       }
     } catch (e: any) {
       setGenImgErr(e?.message || "Failed to generate image");
     } finally {
       setGenImgLoading(false);
+    }
+  }
+
+  async function generateVideo() {
+    if (!content) return;
+
+    try {
+      setGenVidErr(null);
+      setGenVidLoading(true);
+
+      const resp = await api<any>(
+        `/customers/${content.customer_id}/contents/${content.id}/make-video`,
+        { method: "POST" }
+      );
+
+      const newUrl =
+        resp?.video_url ??
+        resp?.data?.video_url ??
+        resp?.url ??
+        resp?.data?.url ??
+        null;
+
+      if (typeof newUrl === "string" && newUrl.length > 0) {
+        setContent((prev) =>
+          prev
+            ? ({
+                ...prev,
+                video_url: newUrl,
+                updated_at: new Date().toISOString(),
+              } as ContentGeneration)
+            : prev
+        );
+      } else {
+        // If only job_id returned, just reload for now (or you can add polling later)
+        await loadContent();
+      }
+    } catch (e: any) {
+      setGenVidErr(e?.message || "Failed to generate video");
+    } finally {
+      setGenVidLoading(false);
     }
   }
 
@@ -441,7 +472,6 @@ export default function BlogContentsDetails() {
               Reload
             </button>
 
-            {/* TOP: Continue to post */}
             <Link
               to={`/customer/blog/post/${content.id}`}
               className="text-xs px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
@@ -615,19 +645,57 @@ export default function BlogContentsDetails() {
           />
         </div>
 
-        {/* Video url */}
-        <AutoField
-          label="Video URL"
-          field="video_url"
-          content={content}
-          setContent={setContent}
-          saveField={saveField}
-          rows={2}
-          copy
-          timersRef={timersRef}
-          saveStates={saveStates}
-          setSaveStates={setSaveStates}
-        />
+        {/* Video url + Generate button */}
+        <div className="bg-white rounded-lg border p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <h3 className="font-medium">Video URL</h3>
+              {genVidLoading && (
+                <span className="text-xs rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
+                  Generating…
+                </span>
+              )}
+              {genVidErr && (
+                <span className="text-xs rounded-full px-2 py-0.5 bg-red-100 text-red-700" title={genVidErr}>
+                  Error
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                className="text-xs px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                onClick={generateVideo}
+                disabled={genVidLoading || !(content.video_script && content.video_script.trim().length)}
+                title={content.video_script ? "Generate a video from the saved Video Script" : "Add a Video Script first"}
+              >
+                {genVidLoading ? "Generating…" : "Generate Video"}
+              </button>
+              {content.video_url ? (
+                <a
+                  href={content.video_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded"
+                >
+                  Open
+                </a>
+              ) : null}
+            </div>
+          </div>
+
+          <AutoField
+            label=""
+            field="video_url"
+            content={content}
+            setContent={setContent}
+            saveField={saveField}
+            rows={2}
+            copy
+            timersRef={timersRef}
+            saveStates={saveStates}
+            setSaveStates={setSaveStates}
+          />
+        </div>
 
         {/* TikTok */}
         <div className="bg-white rounded-lg border">
@@ -755,7 +823,6 @@ export default function BlogContentsDetails() {
           </div>
         </div>
 
-        {/* Error Message from generation */}
         {content.error && (
           <div className="bg-red-50 rounded-lg border border-red-200 p-4">
             <h2 className="font-semibold text-red-800 mb-2">Error Details</h2>
@@ -764,7 +831,6 @@ export default function BlogContentsDetails() {
         )}
       </div>
 
-      {/* BOTTOM: Continue to post */}
       <div className="mt-8 flex justify-end">
         <Link
           to={`/customer/blog/post/${content.id}`}

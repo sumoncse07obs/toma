@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { currentUser } from "@/components/auth";
 
 type PostType = "text" | "image" | "video";
+type PreviewSize = "sm" | "md" | "lg";
 
 type ContentGeneration = {
   id: number;
@@ -77,10 +78,7 @@ function getCustomerIdFromAuth(): number {
 
 type FieldKeys = { title?: keyof ContentGeneration; content?: keyof ContentGeneration };
 
-const FIELD_MAP: Record<
-  string,
-  { text: FieldKeys; image: FieldKeys; video: FieldKeys }
-> = {
+const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: FieldKeys }> = {
   Facebook: {
     text:  { title: "facebook_title",         content: "facebook_content" },
     image: { title: "facebook_title",         content: "facebook_content" },
@@ -101,7 +99,6 @@ const FIELD_MAP: Record<
     image: { title: "x_title",                content: "x_content" },
     video: { title: "x_video_title",          content: "x_video_content" },
   },
-  // "Reals" handled specially with its own radios; map not used directly.
   Reals: { text: {}, image: {}, video: {} },
   "Tick Tok": {
     text:  { title: "tiktok_video_title",     content: "tiktok_video_content" },
@@ -125,11 +122,39 @@ const FIELD_MAP: Record<
   },
 };
 
-// --------- helpers for preview ----------
+// helpers
 const isPlayableVideo = (url?: string | null) =>
   !!url && /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url);
 
-// ----------------------------------------
+const mediaBoxClassBySize: Record<PreviewSize, string> = {
+  sm: "w-64 h-40",
+  md: "w-96 h-56",
+  lg: "w-full h-72",
+};
+
+// Normalize FE -> BE platform keys
+function normalizePlatform(ui: string, reelsPlatform: "facebook" | "instagram"): string {
+  if (ui === "Reals") return reelsPlatform === "facebook" ? "facebook_reels" : "instagram_reels";
+  if (ui === "Twitter/X") return "x";
+  if (ui === "Tick Tok") return "tiktok";
+  if (ui === "YouTube Short") return "youtube_short";
+  if (ui === "Linkedin Business") return "linkedin_page";     // CHANGED
+  if (ui === "Linkedin Personal") return "linkedin_personal"; // CHANGED
+  return ui.toLowerCase(); // facebook, instagram, threads
+}
+
+// Which post types are allowed per platform (UI rule)
+function allowedPostTypes(ui: string): PostType[] {
+  if (ui === "Reals") return ["video"];
+  if (ui === "Tick Tok") return ["video"];          // your schema uses video fields
+  if (ui === "YouTube Short") return ["video"];     // shorts are videos
+  if (ui === "Instagram") return ["image", "video"]; // Instagram: no text-only
+  // default: all three
+  return ["text", "image", "video"];
+}
+
+// format date safely
+const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : "—");
 
 export default function BlogPost() {
   const { id } = useParams<{ id: string }>();
@@ -146,15 +171,28 @@ export default function BlogPost() {
 
   const [record, setRecord] = useState<ContentGeneration | null>(null);
 
-  // save status for video_url autosave
   const [savingVideo, setSavingVideo] =
     useState<"idle" | "saving" | "saved" | "error">("idle");
   const [videoSaveError, setVideoSaveError] = useState<string | null>(null);
 
+  const [previewSize, setPreviewSize] = useState<PreviewSize>("sm");
+
+  // approve button local state
+  const [approveStatus, setApproveStatus] =
+    useState<"idle" | "posting" | "posted" | "error">("idle");
+  const [approveError, setApproveError] = useState<string | null>(null);
+
+  // publish tracking (status + posted_on + urls)
+  const [lastSubmissionId, setLastSubmissionId] = useState<string | null>(null);
+  const [lastPublishLogId, setLastPublishLogId] = useState<number | null>(null);
+  const [publishStatus, setPublishStatus] = useState<"idle" | "queued" | "posted" | "failed">("idle");
+  const [postedOnIso, setPostedOnIso] = useState<string | null>(null);
+  const [publicUrl, setPublicUrl] = useState<string | null>(null);
+
   const customerId = useMemo(() => getCustomerIdFromAuth(), []);
   const platforms = Object.keys(FIELD_MAP);
 
-  // Load record
+  // load record
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -167,15 +205,14 @@ export default function BlogPost() {
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json?.message || "Failed to load");
-
         const data: ContentGeneration = json?.data ?? json;
         if (cancelled) return;
-
         setRecord(data);
         setVideoUrl(data.video_url ?? "");
-
-        setSelectedPlatform("Facebook");
-        setPostType(data.video_url ? "video" : "text");
+        // initial platform is Facebook; ensure postType allowed for that platform
+        const initial: PostType = data.video_url ? "video" : "text";
+        const allowed = allowedPostTypes("Facebook");
+        setPostType(allowed.includes(initial) ? initial : allowed[0]);
       } catch (e: any) {
         if (!cancelled) setLoadError(e.message || "Failed to load");
       } finally {
@@ -186,30 +223,24 @@ export default function BlogPost() {
     return () => { cancelled = true; };
   }, [id]);
 
-  // Persist video_url helper
+  // persist video_url
   async function persistVideoUrl(url: string) {
     if (!record?.id) return;
     const trimmed = (url ?? "").trim();
-    if (!trimmed) {
-      // avoid null/empty if DB has NOT NULL on video_url; remove this guard if you allow clearing
-      return;
-    }
+    if (!trimmed) return;
     try {
       setSavingVideo("saving");
       setVideoSaveError(null);
-
       const res = await fetch(`${API_BASE}/content-generations/${record.id}/video-url`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         credentials: "include",
         body: JSON.stringify({ video_url: trimmed }),
       });
-
       if (!res.ok) {
         const j = await res.json().catch(() => ({} as any));
         throw new Error(j?.message || `Failed to save (HTTP ${res.status})`);
       }
-
       setRecord((prev) => (prev ? { ...prev, video_url: trimmed } : prev));
       setSavingVideo("saved");
       setTimeout(() => setSavingVideo("idle"), 1000);
@@ -219,25 +250,18 @@ export default function BlogPost() {
     }
   }
 
-  // Debounce save when videoUrl changes
   useEffect(() => {
     if (!record?.id) return;
     const trimmed = (videoUrl ?? "").trim();
     if (!trimmed || trimmed === (record.video_url ?? "").trim()) return;
-
-    const t = setTimeout(() => {
-      void persistVideoUrl(trimmed);
-    }, 700);
-
+    const t = setTimeout(() => { void persistVideoUrl(trimmed); }, 700);
     return () => clearTimeout(t);
   }, [videoUrl, record?.id, record?.video_url]);
 
-  // Apply mapping whenever platform/postType/record OR reelsPlatform changes
+  // map fields -> title/description shown
   useEffect(() => {
     if (!record) return;
-
     let keys: FieldKeys | undefined;
-
     if (selectedPlatform === "Reals") {
       keys =
         reelsPlatform === "facebook"
@@ -248,25 +272,23 @@ export default function BlogPost() {
       if (!map) return;
       keys = map[postType];
     }
-
     const newTitle = keys?.title ? (record[keys.title] as string | null) ?? "" : "";
     const newContent = keys?.content ? (record[keys.content] as string | null) ?? "" : "";
-
     setTitle(newTitle);
     setDescription(newContent);
   }, [selectedPlatform, postType, reelsPlatform, record]);
 
+  // when switching platforms, force a valid postType for that platform
   const pickPlatform = (p: string) => {
     setSelectedPlatform(p);
-    if (p === "Tick Tok" || p === "YouTube Short" || p === "Reals") {
-      setPostType("video");
-    }
     if (p === "Reals") {
       setReelsPlatform("facebook");
     }
+    const allowed = allowedPostTypes(p);
+    setPostType((prev) => (allowed.includes(prev) ? prev : allowed[0]));
   };
 
-  // ======== preview data =========
+  // preview data
   const previewMedia = useMemo(() => {
     const img = record?.image_url || "";
     const vid = (videoUrl || record?.video_url || "").trim();
@@ -278,8 +300,177 @@ export default function BlogPost() {
     };
   }, [postType, selectedPlatform, record?.image_url, record?.video_url, videoUrl]);
 
+  // ---- Load latest publish log on mount / platform change ----
+  useEffect(() => {
+    if (!record?.id) return;
+
+    const platformKey = normalizePlatform(selectedPlatform, reelsPlatform);
+    const post_type_normalized: PostType = selectedPlatform === "Reals" ? "video" : postType;
+
+    const loadLatest = async () => {
+      try {
+        const params = new URLSearchParams({
+          content_generation_id: String(record.id),
+          platform: platformKey,
+          post_type: post_type_normalized,
+        });
+
+        const res = await fetch(`${API_BASE}/publish/logs/latest?` + params.toString(), {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+        const js = await res.json().catch(() => ({} as any));
+        const log = js?.data;
+
+        if (!log) {
+          setPublishStatus("idle");
+          setPostedOnIso(null);
+          setPublicUrl(null);
+          setLastSubmissionId(null);
+          setLastPublishLogId(null);
+          return;
+        }
+
+        const st = (log.status as "queued" | "posted" | "failed") ?? "queued";
+        setPublishStatus(st);
+        setPostedOnIso(log.posted_on ?? null);
+        setPublicUrl(log.public_url ?? null);
+        setLastSubmissionId(log.provider_post_id ?? null);
+        setLastPublishLogId(log.id ?? null);
+      } catch {
+        // ignore for UX
+      }
+    };
+
+    void loadLatest();
+  }, [record?.id, selectedPlatform, reelsPlatform, postType]);
+
+  // Poll Blotato status endpoint (backend proxy) until published/failed
+  useEffect(() => {
+    if (!lastSubmissionId) return;
+    if (publishStatus === "posted" || publishStatus === "failed") return;
+
+    let stop = false;
+    const controller = new AbortController();
+
+    const check = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/publish/status/${lastSubmissionId}`, {
+          credentials: "include",
+          signal: controller.signal,
+        });
+        const js = await res.json().catch(() => ({} as any));
+        const st = (js?.status ?? "queued") as string;
+        if (st === "published") {
+          setPublishStatus("posted");
+          setPublicUrl(js?.publicUrl || null);
+          setPostedOnIso(new Date().toISOString());
+          return true;
+        }
+        if (st === "failed") {
+          setPublishStatus("failed");
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    };
+
+    (async () => {
+      const done = await check();
+      if (done) return;
+      const iv = setInterval(async () => {
+        if (stop) return clearInterval(iv);
+        const finished = await check();
+        if (finished) clearInterval(iv);
+      }, 10000);
+    })();
+
+    return () => {
+      stop = true;
+      controller.abort();
+    };
+  }, [lastSubmissionId, publishStatus]);
+
+  // Approve & Publish
+  async function approve() {
+    if (!record?.id) return;
+    setApproveStatus("posting");
+    setApproveError(null);
+
+    let keys: FieldKeys;
+    if (selectedPlatform === "Reals") {
+      keys =
+        reelsPlatform === "facebook"
+          ? { title: "facebook_reels_title", content: "facebook_reels_content" }
+          : { title: "instagram_reels_title", content: "instagram_reels_content" };
+    } else {
+      keys = FIELD_MAP[selectedPlatform][postType];
+    }
+
+    const platformKey = normalizePlatform(selectedPlatform, reelsPlatform);
+    const post_type_normalized: PostType =
+      selectedPlatform === "Reals" ? "video" : postType;
+
+    const media_payload =
+      post_type_normalized === "image"
+        ? { image_url: record?.image_url ?? null }
+        : post_type_normalized === "video"
+        ? { video_url: (videoUrl || record?.video_url || "").trim() || null }
+        : {};
+
+    const body = {
+      content_generation_id: record.id,
+      customer_id: getCustomerIdFromAuth(),
+      platform: platformKey,
+      post_type: post_type_normalized,
+      posted_media: platformKey,
+      title,
+      content: description,
+      ...media_payload,
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(json?.message || `Publish failed (HTTP ${res.status})`);
+      }
+
+      const first = Array.isArray(json?.data) ? json.data[0] : json?.data;
+      const submissionId: string | null = first?.provider_post_id ?? null;
+      const publishLogId: number | null = first?.publish_log_id ?? null;
+      const initialStatus: "queued" | "posted" | "failed" = first?.status ?? "queued";
+      const initialPostedOn: string | null = first?.posted_on ?? null;
+
+      setLastSubmissionId(submissionId);
+      setLastPublishLogId(publishLogId);
+      setPublishStatus(initialStatus);
+      setPostedOnIso(initialPostedOn);
+      setPublicUrl(null);
+
+      setApproveStatus("posted");
+      setTimeout(() => setApproveStatus("idle"), 1200);
+    } catch (err: any) {
+      setApproveStatus("error");
+      setApproveError(err?.message || "Failed to publish");
+    }
+  }
+
   if (loading) return <div className="p-6">Loading post…</div>;
   if (loadError) return <div className="p-6 text-red-600">Failed to load: {loadError}</div>;
+
+  const statusColor =
+    publishStatus === "posted" ? "text-green-600" :
+    publishStatus === "failed" ? "text-red-600" :
+    publishStatus === "queued" ? "text-amber-600" : "text-gray-500";
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-8 px-4">
@@ -288,7 +479,7 @@ export default function BlogPost() {
         Toma <span className="font-bold">Blog</span> Automation
       </h1>
       <div className="text-xs text-gray-500 mb-4">
-        Customer ID: <span className="font-medium">{customerId}</span> • Content ID:{" "}
+        Customer ID: <span className="font-medium">{getCustomerIdFromAuth()}</span> • Content ID:{" "}
         <span className="font-medium">{record?.id}</span>
       </div>
 
@@ -304,9 +495,7 @@ export default function BlogPost() {
 
       {/* Video URL row */}
       <div className="flex gap-3 items-center w-full max-w-4xl mb-1">
-        <label className="text-sm font-medium whitespace-nowrap">
-          Put New Video Url Here
-        </label>
+        <label className="text-sm font-medium whitespace-nowrap">Put New Video Url Here</label>
         <input
           type="text"
           placeholder="Put Updated Video Url Here From Blotato"
@@ -327,9 +516,7 @@ export default function BlogPost() {
         {savingVideo === "saving" && <span className="text-amber-600">Saving…</span>}
         {savingVideo === "saved" && <span className="text-green-600">Saved</span>}
         {savingVideo === "error" && (
-          <span className="text-red-600">
-            Save failed{videoSaveError ? `: ${videoSaveError}` : ""}
-          </span>
+          <span className="text-red-600">Save failed{videoSaveError ? `: ${videoSaveError}` : ""}</span>
         )}
       </div>
 
@@ -372,90 +559,60 @@ export default function BlogPost() {
             placeholder="Post text / description"
           />
 
-          {/* Radios:
-              - Normal: 3 post-type radios
-              - Reels selected: 2 radios (Facebook / Instagram) */}
+          {/* Radios */}
           {selectedPlatform === "Reals" ? (
             <div className="space-y-2">
               <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={reelsPlatform === "facebook"}
-                  onChange={() => setReelsPlatform("facebook")}
-                />
+                <input type="radio" checked={reelsPlatform === "facebook"} onChange={() => setReelsPlatform("facebook")} />
                 Facebook
               </label>
               <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={reelsPlatform === "instagram"}
-                  onChange={() => setReelsPlatform("instagram")}
-                />
+                <input type="radio" checked={reelsPlatform === "instagram"} onChange={() => setReelsPlatform("instagram")} />
                 Instagram
               </label>
             </div>
           ) : (
             <div className="space-y-2">
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={postType === "text"}
-                  onChange={() => setPostType("text")}
-                />
-                Post Text Only
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={postType === "image"}
-                  onChange={() => setPostType("image")}
-                />
-                Post Text and Image
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={postType === "video"}
-                  onChange={() => setPostType("video")}
-                />
-                Post Text and Video
-              </label>
+              {/* Only render allowed post types for the selected platform */}
+              {allowedPostTypes(selectedPlatform).includes("text") && (
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={postType === "text"}
+                    onChange={() => setPostType("text")}
+                  />
+                  Post Text Only
+                </label>
+              )}
+              {allowedPostTypes(selectedPlatform).includes("image") && (
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={postType === "image"}
+                    onChange={() => setPostType("image")}
+                  />
+                  Post Text and Image
+                </label>
+              )}
+              {allowedPostTypes(selectedPlatform).includes("video") && (
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={postType === "video"}
+                    onChange={() => setPostType("video")}
+                  />
+                  Post Text and Video
+                </label>
+              )}
             </div>
           )}
         </div>
 
-        {/* Right: actions */}
+        {/* Right: actions + STATUS PANEL */}
         <div className="flex flex-col justify-between space-y-4">
           <button
             className="w-full bg-orange-500 text-white py-2 rounded-md hover:bg-orange-600"
             onClick={() => {
-              let keys: FieldKeys;
-              if (selectedPlatform === "Reals") {
-                keys =
-                  reelsPlatform === "facebook"
-                    ? { title: "facebook_reels_title", content: "facebook_reels_content" }
-                    : { title: "instagram_reels_title", content: "instagram_reels_content" };
-              } else {
-                keys = FIELD_MAP[selectedPlatform][postType];
-              }
-
-              const payload = {
-                id: record?.id,
-                customer_id: customerId,
-                platform:
-                  selectedPlatform === "Reals"
-                    ? reelsPlatform === "facebook"
-                      ? "Facebook Reels"
-                      : "Instagram Reels"
-                    : selectedPlatform,
-                post_type: selectedPlatform === "Reals" ? "video" : postType,
-                video_url: videoUrl,
-                mapped_title_field: keys.title,
-                mapped_content_field: keys.content,
-                title,
-                content: description,
-              };
-              console.log("Schedule payload", payload);
               alert("Scheduling stub — wire this to your API.");
             }}
           >
@@ -463,83 +620,104 @@ export default function BlogPost() {
           </button>
 
           <button
-            className="w-full bg-teal-500 text-white py-2 rounded-md hover:bg-teal-600"
-            onClick={() => {
-              let keys: FieldKeys;
-              if (selectedPlatform === "Reals") {
-                keys =
-                  reelsPlatform === "facebook"
-                    ? { title: "facebook_reels_title", content: "facebook_reels_content" }
-                    : { title: "instagram_reels_title", content: "instagram_reels_content" };
-              } else {
-                keys = FIELD_MAP[selectedPlatform][postType];
-              }
-
-              const updates: Record<string, any> = { video_url: videoUrl };
-              if (keys.title) updates[String(keys.title)] = title;
-              if (keys.content) updates[String(keys.content)] = description;
-
-              console.log("Approve/save payload", {
-                id: record?.id,
-                customer_id: customerId,
-                updates,
-              });
-              alert("Approve stub — send these updates to your backend.");
-            }}
+            className={`w-full text-white py-2 rounded-md ${approveStatus === "posting" ? "bg-teal-300" : "bg-teal-500 hover:bg-teal-600"}`}
+            disabled={approveStatus === "posting"}
+            onClick={() => void approve()}
           >
-            Approve
+            {approveStatus === "posting" ? "Submitting…" : "Approve & Publish"}
           </button>
-        </div>
 
-        {/* ======= LIVE PREVIEW (spans two columns on desktop) ======= */}
-        <div className="md:col-span-2 border border-gray-300 rounded-lg p-4">
-          <div className="text-sm font-semibold text-gray-700 mb-3">
-            Live Preview ·{" "}
-            {selectedPlatform === "Reals"
-              ? `Reels · ${reelsPlatform === "facebook" ? "Facebook" : "Instagram"}`
-              : `${selectedPlatform} · ${postType.toUpperCase()}`}
+          <div className="rounded-md border border-gray-200 p-3 text-sm bg-gray-50">
+            <div className="flex items-center justify-between">
+              <span className="text-gray-600">Publish status</span>
+              <span className={`font-medium ${
+                publishStatus === "posted" ? "text-green-600" :
+                publishStatus === "failed" ? "text-red-600" :
+                publishStatus === "queued" ? "text-amber-600" : "text-gray-500"
+              }`}>
+                {publishStatus === "idle" ? "—" :
+                 publishStatus === "queued" ? "Queued" :
+                 publishStatus === "posted" ? "Published" :
+                 "Failed"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between mt-1">
+              <span className="text-gray-600">Posted on</span>
+              <span className="font-medium text-gray-900">{fmt(postedOnIso)}</span>
+            </div>
+
+            {publicUrl && (
+              <div className="mt-2">
+                <a href={publicUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                  View on platform
+                </a>
+              </div>
+            )}
+
+            {lastSubmissionId && (
+              <div className="mt-2 text-[11px] text-gray-500 break-all">
+                Submission ID: <span className="font-mono">{lastSubmissionId}</span>
+              </div>
+            )}
           </div>
 
-          {/* Media on top (image OR video) */}
+          <div className="min-h-5 text-xs">
+            {approveStatus === "posted" && <span className="text-green-600">Submitted to Blotato.</span>}
+            {approveStatus === "error" && (
+              <span className="text-red-600">Publish failed{approveError ? `: ${approveError}` : ""}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Live Preview */}
+        <div className="md:col-span-2 border border-gray-300 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-semibold text-gray-700">
+              Live Preview ·{" "}
+              {selectedPlatform === "Reals"
+                ? `Reels · ${reelsPlatform === "facebook" ? "Facebook" : "Instagram"}`
+                : `${selectedPlatform} · ${postType.toUpperCase()}`}
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-gray-500">Preview size:</span>
+              {(["sm","md","lg"] as const).map((s) => (
+                <label key={s} className="flex items-center gap-1 cursor-pointer">
+                  <input type="radio" checked={previewSize === s} onChange={() => setPreviewSize(s)} />
+                  <span className={previewSize === s ? "font-medium" : ""}>{s.toUpperCase()}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
           {previewMedia.showVideo ? (
             isPlayableVideo(previewMedia.videoUrl) ? (
-              <video
-                key={previewMedia.videoUrl}
-                src={previewMedia.videoUrl}
-                controls
-                className="w-full rounded-md mb-3"
-              />
+              <div className={`rounded-md mb-3 border border-gray-200 overflow-hidden flex items-center justify-center bg-black/5 ${mediaBoxClassBySize[previewSize]}`}>
+                <video key={previewMedia.videoUrl} src={previewMedia.videoUrl} controls className="w-full h-full object-cover" />
+              </div>
             ) : (
-              <div className="w-full h-48 rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm">
-                {previewMedia.videoUrl
-                  ? "Video URL isn't a direct .mp4/.webm/.mov/.m4v — preview not available"
-                  : "No video URL provided"}
+              <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
+                {previewMedia.videoUrl ? "Video URL isn't a direct .mp4/.webm/.mov/.m4v — preview not available" : "No video URL provided"}
               </div>
             )
           ) : previewMedia.showImage ? (
             previewMedia.imageUrl ? (
-              <img
-                src={previewMedia.imageUrl}
-                alt="Post image"
-                className="w-full rounded-md mb-3 object-cover"
-              />
+              <div className={`rounded-md mb-3 border border-gray-200 overflow-hidden bg-gray-50 ${mediaBoxClassBySize[previewSize]}`}>
+                <img src={previewMedia.imageUrl} alt="Post image" className="w-full h-full object-cover" />
+              </div>
             ) : (
-              <div className="w-full h-48 rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm">
+              <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
                 No image available
               </div>
             )
           ) : null}
 
-          {/* Title */}
           <div className="text-base font-medium text-gray-900 whitespace-pre-wrap">
             {title?.trim() ? title : <span className="text-gray-400">Title will appear here…</span>}
           </div>
 
-          {/* Description */}
           <div className="mt-2 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
-            {description?.trim()
-              ? description
-              : <span className="text-gray-400">Description will appear here…</span>}
+            {description?.trim() ? description : <span className="text-gray-400">Description will appear here…</span>}
           </div>
         </div>
       </div>
