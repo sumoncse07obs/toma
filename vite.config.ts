@@ -12,7 +12,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "http://tomaapi.thedrivingtrafficformula.com",
+        target: "https://tomaapi.thedrivingtrafficformula.com",
         changeOrigin: true,
         secure: false,
         // If you need websockets too, uncomment:
