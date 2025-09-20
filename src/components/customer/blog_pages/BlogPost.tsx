@@ -63,7 +63,45 @@ type ContentGeneration = {
   pinterest_description?: string | null;
 };
 
-const API_BASE = `${import.meta.env.VITE_API_BASE}/api`
+// Prefer proxy in dev: set VITE_API_BASE="/api". In prod set full origin.
+const API_BASE = `${import.meta.env.VITE_API_BASE}/api`;
+const TOKEN_KEY = "toma_token";
+
+/** normalize URL and keep one slash */
+function norm(path: string) {
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`.replace(
+    /([^:]\/)\/+/g,
+    "$1"
+  );
+}
+
+/** token-based API helper (no cookies/credentials) */
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const res = await fetch(norm(path), {
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers || {}),
+    },
+    ...init,
+  });
+  if (!res.ok) {
+    // try to surface backend error
+    const text = await res.text().catch(() => "");
+    let msg = text || res.statusText || "Request failed";
+    try {
+      const j = JSON.parse(text);
+      msg = j?.message || msg;
+    } catch {}
+    throw new Error(`HTTP ${res.status}: ${msg}`);
+  }
+  const ct = res.headers.get("content-type") || "";
+  return (ct.includes("application/json")
+    ? await res.json()
+    : (undefined as any)) as T;
+}
 
 function getCustomerIdFromAuth(): number {
   const u: any = currentUser?.() ?? null;
@@ -138,18 +176,17 @@ function normalizePlatform(ui: string, reelsPlatform: "facebook" | "instagram"):
   if (ui === "Twitter/X") return "x";
   if (ui === "Tick Tok") return "tiktok";
   if (ui === "YouTube Short") return "youtube_short";
-  if (ui === "Linkedin Business") return "linkedin_page";     // CHANGED
-  if (ui === "Linkedin Personal") return "linkedin_personal"; // CHANGED
+  if (ui === "Linkedin Business") return "linkedin_page";
+  if (ui === "Linkedin Personal") return "linkedin_personal";
   return ui.toLowerCase(); // facebook, instagram, threads
 }
 
 // Which post types are allowed per platform (UI rule)
 function allowedPostTypes(ui: string): PostType[] {
   if (ui === "Reals") return ["video"];
-  if (ui === "Tick Tok") return ["video"];          // your schema uses video fields
-  if (ui === "YouTube Short") return ["video"];     // shorts are videos
-  if (ui === "Instagram") return ["image", "video"]; // Instagram: no text-only
-  // default: all three
+  if (ui === "Tick Tok") return ["video"];
+  if (ui === "YouTube Short") return ["video"];
+  if (ui === "Instagram") return ["image", "video"]; // no text-only
   return ["text", "image", "video"];
 }
 
@@ -199,12 +236,9 @@ export default function BlogPost() {
       setLoading(true);
       setLoadError(null);
       try {
-        const res = await fetch(`${API_BASE}/content-generations/${id}`, {
+        const json = await api<any>(`/content-generations/${id}`, {
           headers: { Accept: "application/json" },
-          credentials: "include",
         });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json?.message || "Failed to load");
         const data: ContentGeneration = json?.data ?? json;
         if (cancelled) return;
         setRecord(data);
@@ -231,16 +265,10 @@ export default function BlogPost() {
     try {
       setSavingVideo("saving");
       setVideoSaveError(null);
-      const res = await fetch(`${API_BASE}/content-generations/${record.id}/video-url`, {
+      await api(`/content-generations/${record.id}/video-url`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        credentials: "include",
         body: JSON.stringify({ video_url: trimmed }),
       });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({} as any));
-        throw new Error(j?.message || `Failed to save (HTTP ${res.status})`);
-      }
       setRecord((prev) => (prev ? { ...prev, video_url: trimmed } : prev));
       setSavingVideo("saved");
       setTimeout(() => setSavingVideo("idle"), 1000);
@@ -314,12 +342,9 @@ export default function BlogPost() {
           platform: platformKey,
           post_type: post_type_normalized,
         });
-
-        const res = await fetch(`${API_BASE}/publish/logs/latest?` + params.toString(), {
-          credentials: "include",
+        const js = await api<any>(`/publish/logs/latest?${params.toString()}`, {
           headers: { Accept: "application/json" },
         });
-        const js = await res.json().catch(() => ({} as any));
         const log = js?.data;
 
         if (!log) {
@@ -355,11 +380,9 @@ export default function BlogPost() {
 
     const check = async () => {
       try {
-        const res = await fetch(`${API_BASE}/publish/status/${lastSubmissionId}`, {
-          credentials: "include",
+        const js = await api<any>(`/publish/status/${lastSubmissionId}`, {
           signal: controller.signal,
         });
-        const js = await res.json().catch(() => ({} as any));
         const st = (js?.status ?? "queued") as string;
         if (st === "published") {
           setPublishStatus("posted");
@@ -432,17 +455,10 @@ export default function BlogPost() {
     };
 
     try {
-      const res = await fetch(`${API_BASE}/publish`, {
+      const json = await api<any>("/publish", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        credentials: "include",
         body: JSON.stringify(body),
       });
-      const json = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        throw new Error(json?.message || `Publish failed (HTTP ${res.status})`);
-      }
 
       const first = Array.isArray(json?.data) ? json.data[0] : json?.data;
       const submissionId: string | null = first?.provider_post_id ?? null;
