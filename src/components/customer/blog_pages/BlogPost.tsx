@@ -63,7 +63,7 @@ type ContentGeneration = {
   pinterest_description?: string | null;
 };
 
-const API_BASE = "/api";
+const API_BASE = `${import.meta.env.VITE_API_BASE}/api`
 
 function getCustomerIdFromAuth(): number {
   const u: any = currentUser?.() ?? null;
