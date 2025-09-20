@@ -31,30 +31,50 @@ type CustomersListResponse = {
   total: number;
   page: number;
   per_page: number;
-};
+} & Record<string, any>; // allow {items:[]} style too
 
-/** ===== API helper ===== */
-const API_BASE = `${import.meta.env.VITE_API_BASE}/api`
-const AUTH_TOKEN = localStorage.getItem("token"); // optional Bearer
+/** ===== API helper (matches the other pages) ===== */
+const API_BASE = `${import.meta.env.VITE_API_BASE}/api`;
+const TOKEN_KEY = "toma_token";
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = `${API_BASE}${path}`.replace(/([^:]\/)\/+/g, "$1"); // collapse double slashes
-  const res = await fetch(url, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
-      ...init?.headers,
-    },
-    ...init, // no credentials to avoid CORS with *
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    console.error("[API ERROR]", res.status, res.statusText, url, text);
-    throw new Error(`${res.status} ${res.statusText}: ${text}`);
-  }
-  return res.json();
+function norm(path: string) {
+  // ensure single slash between base and path
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`.replace(
+    /([^:]\/)\/+/g,
+    "$1"
+  );
 }
 
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const res = await fetch(norm(path), {
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers || {}),
+    },
+    ...init,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let msg = text || res.statusText || "Request failed";
+    try {
+      const j = JSON.parse(text);
+      msg = j?.message || msg;
+    } catch {}
+    console.error("[API ERROR]", res.status, res.statusText, path, msg);
+    throw new Error(`HTTP ${res.status}: ${msg}`);
+  }
+  const ct = res.headers.get("content-type") || "";
+  return (ct.includes("application/json")
+    ? await res.json()
+    : (undefined as any)) as T;
+}
+
+/** ===== Customers API =====
+ * NOTE: Endpoints DO NOT prefix with /api here (API_BASE already ends with /api)
+ */
 const CustomersAPI = {
   async list(params?: { q?: string; page?: number; per_page?: number }) {
     const qs = new URLSearchParams();
@@ -62,7 +82,7 @@ const CustomersAPI = {
     if (params?.page) qs.set("page", String(params.page));
     if (params?.per_page) qs.set("per_page", String(params.per_page));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return api<CustomersListResponse>(`/api/customers/${suffix}`);
+    return api<CustomersListResponse>(`/customers${suffix}`);
   },
 
   async create(payload: {
@@ -78,21 +98,21 @@ const CustomersAPI = {
     state?: string;
     about?: string;
   }) {
-    return api<Customer>(`/api/customers`, {
+    return api<Customer>(`/customers`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
   },
 
   async update(id: number, payload: Partial<Omit<Customer, "id" | "user_id" | "user">>) {
-    return api<Customer>(`/api/customers/${id}`, {
+    return api<Customer>(`/customers/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
     });
   },
 
   async toggleActive(id: number) {
-    return api<Customer>(`/api/customers/${id}/toggle`, { method: "PATCH" });
+    return api<Customer>(`/customers/${id}/toggle`, { method: "PATCH" });
   },
 };
 
@@ -311,8 +331,15 @@ export default function CustomersPage() {
     setError(null);
     try {
       const res = await CustomersAPI.list({ q, page, per_page: perPage });
-      setData(res.data);
-      setTotal(res.total);
+      // support both {data,total} and {items,total}
+      const rows = Array.isArray((res as any).data)
+        ? (res as any).data
+        : Array.isArray((res as any).items)
+        ? (res as any).items
+        : [];
+      const tot = (res as any).total ?? rows.length;
+      setData(rows);
+      setTotal(tot);
     } catch (e: any) {
       setError(e?.message ?? "Failed to load customers");
     } finally {
@@ -465,7 +492,7 @@ export default function CustomersPage() {
         {/* Pagination */}
         <div className="mt-4 flex flex-col items-center justify-between gap-3 md:flex-row">
           <div className="text-sm text-slate-600">
-            Page {page} of {Math.max(1, Math.ceil(total / perPage))} • {total} total
+            Page {page} of {totalPages} • {total} total
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -483,7 +510,7 @@ export default function CustomersPage() {
             />
             <Button
               variant="ghost"
-              disabled={page >= Math.max(1, Math.ceil(total / perPage))}
+              disabled={page >= totalPages}
               onClick={() => setPage((p) => p + 1)}
             >
               Next →
