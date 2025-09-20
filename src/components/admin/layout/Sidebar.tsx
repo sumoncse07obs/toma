@@ -12,7 +12,6 @@ type Props = {
 const navItems = [
   { to: "/admin/customers",             label: "Customers",         icon: "👥" },
   { to: "/admin/blog-prompt-setup",     label: "Blog Prompt Setup", icon: "▶️" },
-  { to: "/admin/blog-content-generator",label: "Content Generator", icon: "📚" },
   { to: "/admin/launch",                label: "Launch Automation", icon: "🚀" },
   { to: "/admin/users",                 label: "Users",             icon: "👥" },
 ];
