@@ -20,7 +20,8 @@ type Settings = {
   blotato_linkeidin_page_ids?: string[] | null;
 };
 
-const API_BASE = "/api";
+//const API_BASE = "/api";
+const API_BASE = `${import.meta.env.VITE_API_BASE}/api`
 
 export default function SettingsPage() {
   const [loading, setLoading] = React.useState(true);

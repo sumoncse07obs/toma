@@ -27,7 +27,8 @@ type MakeImageResponse =
 
 /* ========= Constants & helpers ========= */
 // Use Vite dev proxy: "/api" -> http://127.0.0.1:8000
-const API_BASE_URL = "/api";
+const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`
+//const API_BASE_URL = "/api";
 const TOKEN_KEY = "toma_token";
 
 const baseJsonHeaders: HeadersInit = {
