@@ -17,7 +17,7 @@ import React from "react";
 // ----------------------------
 // Config
 // ----------------------------
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
+const API_BASE = "/api";
 const API = (path: string) => `${API_BASE}/api${path}`.replace(/([^:]\/)\/+/g, "$1");
 
 // ----------------------------

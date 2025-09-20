@@ -34,7 +34,7 @@ type CustomersListResponse = {
 };
 
 /** ===== API helper ===== */
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
+const API_BASE = "/api";
 const AUTH_TOKEN = localStorage.getItem("token"); // optional Bearer
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {

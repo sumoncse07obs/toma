@@ -20,7 +20,7 @@ type Settings = {
   blotato_linkeidin_page_ids?: string[] | null;
 };
 
-const API_BASE = "/api"; // Vite proxy -> http://tomaapi.thedrivingtrafficformula.com
+const API_BASE = "/api";
 
 export default function SettingsPage() {
   const [loading, setLoading] = React.useState(true);
@@ -163,7 +163,7 @@ export default function SettingsPage() {
 
           <div className="mb-4">
             <label className="block text-sm font-medium mb-1">
-              Facebook Page IDs (comma separated)
+              Facebook Page IDs (comma separated-9927653170252,9927653170252)
             </label>
             <textarea
               className="w-full rounded-md border px-3 py-2 min-h-[80px]"
@@ -175,7 +175,7 @@ export default function SettingsPage() {
 
           <div>
             <label className="block text-sm font-medium mb-1">
-              LinkedIn Page IDs (comma separated)
+              LinkedIn Page IDs (comma separated-9927653170252,9927653170252)
             </label>
             <textarea
               className="w-full rounded-md border px-3 py-2 min-h-[80px]"
