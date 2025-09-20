@@ -77,34 +77,47 @@ type CustomersListResponse = {
   total: number;
   page: number;
   per_page: number;
-};
+} & Record<string, any>;
 
 /* =========================
    API helper
    ========================= */
 
-const API_BASE = `${import.meta.env.VITE_API_BASE}/api`
+const API_BASE = `${import.meta.env.VITE_API_BASE}/api`;
+const TOKEN_KEY = "toma_token";
+
+function norm(path: string) {
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`.replace(
+    /([^:]\/)\/+/g,
+    "$1"
+  );
+}
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = `${API_BASE}${path}`.replace(/([^:]\/)\/+/g, "$1");
-  const token = localStorage.getItem("token");
-  console.log("[API]", init?.method ?? "GET", url); // debug; remove later
-
-  const res = await fetch(url, {
-    ...init,
+  const token = localStorage.getItem(TOKEN_KEY);
+  const res = await fetch(norm(path), {
     headers: {
       "Content-Type": "application/json",
-      "X-Requested-With": "XMLHttpRequest",
+      Accept: "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
+    ...init,
   });
   if (!res.ok) {
-    const text = await res.text();
-    console.error("[API ERROR]", res.status, res.statusText, url, text);
-    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+    const text = await res.text().catch(() => "");
+    let msg = text || res.statusText || "Request failed";
+    try {
+      const j = JSON.parse(text);
+      msg = j?.message || msg;
+    } catch {}
+    console.error("[API ERROR]", res.status, res.statusText, path, msg);
+    throw new Error(`HTTP ${res.status}: ${msg}`);
   }
-  return res.json();
+  const ct = res.headers.get("content-type") || "";
+  return (ct.includes("application/json")
+    ? await res.json()
+    : (undefined as any)) as T;
 }
 
 const CustomersAPI = {
@@ -114,7 +127,8 @@ const CustomersAPI = {
     if (params?.page) qs.set("page", String(params.page));
     if (params?.per_page) qs.set("per_page", String(params.per_page));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return api<CustomersListResponse>(`/api/customers${suffix}`); // no extra slash
+    // NOTE: API_BASE already ends with /api, so we use /customers here (NOT /api/customers)
+    return api<CustomersListResponse>(`/customers${suffix}`);
   },
 };
 
@@ -123,11 +137,12 @@ const unwrap = <T,>(res: any): T => (res?.data ?? res) as T;
 
 const PromptBlogAPI = {
   async getByCustomer(customerId: number) {
-    const res = await api<any>(`/api/prompt-blog?customer_id=${customerId}`);
+    // NOT /api/prompt-blog — API_BASE has /api
+    const res = await api<any>(`/prompt-blog?customer_id=${customerId}`);
     return unwrap<PromptBlog | null>(res);
   },
   async create(payload: Omit<PromptBlog, "id" | "created_at" | "updated_at">) {
-    const res = await api<any>(`/api/prompt-blog`, {
+    const res = await api<any>(`/prompt-blog`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -136,7 +151,7 @@ const PromptBlogAPI = {
   async update(id: number, payload: Partial<PromptBlog>) {
     // IMPORTANT: backend prohibits customer_id on update — do NOT send it
     const { id: _i, customer_id: _c, created_at: _ca, updated_at: _ua, ...rest } = payload as any;
-    const res = await api<any>(`/api/prompt-blog/${id}`, {
+    const res = await api<any>(`/prompt-blog/${id}`, {
       method: "PUT",
       body: JSON.stringify(rest),
     });
@@ -348,7 +363,12 @@ export default function PromptBlogSettings() {
       try {
         const res = await CustomersAPI.list({ page: 1, per_page: 200 });
         if (!mounted) return;
-        setCustomers(res.data);
+        const rows = Array.isArray((res as any).data)
+          ? (res as any).data
+          : Array.isArray((res as any).items)
+          ? (res as any).items
+          : [];
+        setCustomers(rows);
       } catch (e: any) {
         if (!mounted) return;
         setCustError(e?.message ?? "Failed to load customers");
