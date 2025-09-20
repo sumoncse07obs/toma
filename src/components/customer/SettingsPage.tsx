@@ -7,7 +7,7 @@ type Settings = {
   dumplingai_api_key?: string | null;
 
   blotato_twitter_id?: string | null;
-  blotato_linkeidin_id?: string | null;
+  blotato_linkeidin_id?: string | null;         // keep current backend key
   blotato_facebook_id?: string | null;
   blotato_tiktok_id?: string | null;
   blotato_instagram_id?: string | null;
@@ -17,11 +17,58 @@ type Settings = {
   blotato_youtube_id?: string | null;
 
   blotato_facebook_page_ids?: string[] | null;
-  blotato_linkeidin_page_ids?: string[] | null;
+  blotato_linkeidin_page_ids?: string[] | null; // keep current backend key
 };
 
-//const API_BASE = "/api";
-const API_BASE = `${import.meta.env.VITE_API_BASE}/api`
+// Prefer proxy in dev: set VITE_API_BASE="/api". In prod set full origin.
+const API_BASE = `${import.meta.env.VITE_API_BASE}/api`;
+const TOKEN_KEY = "toma_token";
+
+/** normalize URL and keep one slash */
+function norm(path: string) {
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`.replace(
+    /([^:]\/)\/+/g,
+    "$1"
+  );
+}
+
+/** token-based API helper (no cookies/credentials) */
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const res = await fetch(norm(path), {
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers || {}),
+    },
+    ...init,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let msg = text || res.statusText || "Request failed";
+    try {
+      const j = JSON.parse(text);
+      msg = j?.message || msg;
+    } catch {}
+    throw new Error(`HTTP ${res.status}: ${msg}`);
+  }
+  const ct = res.headers.get("content-type") || "";
+  return (ct.includes("application/json")
+    ? await res.json()
+    : (undefined as any)) as T;
+}
+
+/** helpers to map textarea <-> string[] */
+function textToIdArray(txt: string): string[] {
+  return txt
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+function arrayToText(arr?: string[] | null): string {
+  return (arr ?? []).join(", ");
+}
 
 export default function SettingsPage() {
   const [loading, setLoading] = React.useState(true);
@@ -38,17 +85,13 @@ export default function SettingsPage() {
   React.useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/settings`, {
-          headers: { Accept: "application/json" },
-          credentials: "include",
-        });
-        const json = await res.json();
-        const data: Settings = json?.data ?? {};
+        const json = await api<any>("/settings", { headers: { Accept: "application/json" } });
+        const data: Settings = json?.data ?? json ?? {};
         setForm(data);
-        setFbPagesText((data.blotato_facebook_page_ids ?? []).join(", "));
-        setLiPagesText((data.blotato_linkeidin_page_ids ?? []).join(", "));
+        setFbPagesText(arrayToText(data.blotato_facebook_page_ids));
+        setLiPagesText(arrayToText(data.blotato_linkeidin_page_ids));
       } catch (e: any) {
-        setMsg("Failed to load settings.");
+        setMsg(e?.message || "Failed to load settings.");
       } finally {
         setLoading(false);
       }
@@ -67,30 +110,27 @@ export default function SettingsPage() {
     setSaving(true);
     setMsg(null);
 
-    const payload: any = { ...form };
-    payload.blotato_facebook_page_ids = fbPagesText;
-    payload.blotato_linkeidin_page_ids = liPagesText;
+    // Build payload with arrays for page IDs
+    const payload: Settings = {
+      ...form,
+      blotato_facebook_page_ids: textToIdArray(fbPagesText),
+      blotato_linkeidin_page_ids: textToIdArray(liPagesText),
+    };
 
     try {
-      const res = await fetch(`${API_BASE}/settings`, {
+      const json = await api<any>("/settings", {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        credentials: "include",
         body: JSON.stringify(payload),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.message || "Save failed");
+      const saved: Settings = json?.data ?? json ?? payload;
       setMsg("Saved!");
-      // normalize textareas with any cleaning done by server:
-      const saved: Settings = json.data;
-      setFbPagesText((saved.blotato_facebook_page_ids ?? []).join(", "));
-      setLiPagesText((saved.blotato_linkeidin_page_ids ?? []).join(", "));
+
+      // normalize with any server cleanup
       setForm(saved);
+      setFbPagesText(arrayToText(saved.blotato_facebook_page_ids));
+      setLiPagesText(arrayToText(saved.blotato_linkeidin_page_ids));
     } catch (e: any) {
-      setMsg(e.message || "Save failed");
+      setMsg(e?.message || "Save failed");
     } finally {
       setSaving(false);
     }
@@ -164,7 +204,7 @@ export default function SettingsPage() {
 
           <div className="mb-4">
             <label className="block text-sm font-medium mb-1">
-              Facebook Page IDs (comma separated-9927653170252,9927653170252)
+              Facebook Page IDs (comma separated — e.g., 9927653170252, 9927653170252)
             </label>
             <textarea
               className="w-full rounded-md border px-3 py-2 min-h-[80px]"
@@ -176,7 +216,7 @@ export default function SettingsPage() {
 
           <div>
             <label className="block text-sm font-medium mb-1">
-              LinkedIn Page IDs (comma separated-9927653170252,9927653170252)
+              LinkedIn Page IDs (comma separated — e.g., urn:li:organization:123, urn:li:organization:456)
             </label>
             <textarea
               className="w-full rounded-md border px-3 py-2 min-h-[80px]"
