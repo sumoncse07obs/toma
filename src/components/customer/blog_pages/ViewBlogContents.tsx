@@ -391,7 +391,7 @@ export default function BlogContentsDetails() {
         resp?.data?.url ??
         null;
 
-      // NEW: capture Blotato job id + status and persist immediately
+      // capture job id + status and persist immediately
       const jobId = resp?.job_id ?? null;
       const status = resp?.status ?? null;
 
@@ -432,6 +432,46 @@ export default function BlogContentsDetails() {
       }
     } catch (e: any) {
       setGenVidErr(e?.message || "Failed to generate video");
+    } finally {
+      setGenVidLoading(false);
+    }
+  }
+
+  // NEW: manual "Check Status" button action
+  async function checkVideoStatus() {
+    if (!content) return;
+    try {
+      setGenVidErr(null);
+      setGenVidLoading(true);
+
+      const suffix = content.blotato_video_id
+        ? `?job_id=${encodeURIComponent(content.blotato_video_id)}`
+        : "";
+
+      const resp = await api<any>(
+        `/customers/${content.customer_id}/contents/${content.id}/check-video${suffix}`
+      );
+
+      const status = resp?.status ?? null;
+      const jobId = resp?.job_id ?? content.blotato_video_id ?? null;
+      const videoUrl =
+        resp?.video_url ??
+        resp?.data?.video_url ??
+        null;
+
+      setContent((prev) =>
+        prev
+          ? ({
+              ...prev,
+              blotato_video_status: status ?? prev.blotato_video_status ?? null,
+              blotato_video_id: jobId,
+              video_url: typeof videoUrl === "string" && videoUrl.length > 0 ? videoUrl : prev.video_url,
+              updated_at: new Date().toISOString(),
+            } as ContentGeneration)
+          : prev
+      );
+    } catch (e: any) {
+      setGenVidErr(e?.message || "Failed to check video status");
     } finally {
       setGenVidLoading(false);
     }
@@ -587,7 +627,7 @@ export default function BlogContentsDetails() {
                 <span className="ml-1 break-all">{content.blotato_video_id || "—"}</span>
                 {content.blotato_video_id ? (
                   <span className="ml-1 inline-block">
-                    <CopyBtn value={content.blotato_video_id} />
+                    <CopyBtn value={content.blotato_video_id!} />
                   </span>
                 ) : null}
               </div>
@@ -702,14 +742,14 @@ export default function BlogContentsDetails() {
           </div>
         </div>
 
-        {/* Video url + Generate button */}
+        {/* Video url + Generate + Check button */}
         <div className="bg-white rounded-lg border p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <h3 className="font-medium">Video URL</h3>
               {genVidLoading && (
                 <span className="text-xs rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
-                  Generating…
+                  Working…
                 </span>
               )}
               {genVidErr && (
@@ -727,6 +767,17 @@ export default function BlogContentsDetails() {
               >
                 {genVidLoading ? "Generating…" : "Generate Video"}
               </button>
+
+              {/* NEW: Check Status button */}
+              <button
+                className="text-xs px-3 py-1 rounded bg-gray-100 text-gray-800 hover:bg-gray-200 disabled:opacity-50"
+                onClick={checkVideoStatus}
+                disabled={genVidLoading || !(content.blotato_video_id || content.blotato_video_status)}
+                title={content.blotato_video_id ? "Check Blotato status and pull URL if ready" : "Generate a video first"}
+              >
+                Check Status
+              </button>
+
               {content.video_url ? (
                 <a
                   href={content.video_url}
@@ -752,6 +803,7 @@ export default function BlogContentsDetails() {
             saveStates={saveStates}
             setSaveStates={setSaveStates}
           />
+
           <div className="mt-2 text-xs text-gray-600">
             Do not like this video? Want to upload your video ?{" "}
             <Link

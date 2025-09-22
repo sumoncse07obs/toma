@@ -25,10 +25,18 @@ type MakeImageResponse =
   | { image_url?: string; url?: string; data?: { image_url?: string; url?: string } }
   | Record<string, any>;
 
+type MakeVideoResponse =
+  | {
+      job_id?: string | null;
+      status?: string | null;
+      video_url?: string | null;
+      data?: { video_url?: string | null };
+      raw?: any;
+    }
+  | Record<string, any>;
+
 /* ========= Constants & helpers ========= */
-// Use Vite dev proxy: "/api" -> http://127.0.0.1:8000
-const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`
-//const API_BASE_URL = "/api";
+const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`;
 const TOKEN_KEY = "toma_token";
 
 const baseJsonHeaders: HeadersInit = {
@@ -65,22 +73,25 @@ export default function NewBlogContents() {
   const [vidSrcUrl, setVidSrcUrl] = useState("");
 
   const [loading, setLoading] = useState(false);
-  const [elapsedMs, setElapsedMs] = useState(0); // ⏱ elapsed time
-  const timerRef = useRef<number | null>(null); // interval id
-  const [lastDurationMs, setLastDurationMs] = useState<number | null>(null); // last run duration
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const timerRef = useRef<number | null>(null);
+  const [lastDurationMs, setLastDurationMs] = useState<number | null>(null);
 
   const [err, setErr] = useState<string | null>(null);
   const [out, setOut] = useState<GenOutputs>({});
-  const [genId, setGenId] = useState<number | null>(null); // 👈 created content id
+  const [genId, setGenId] = useState<number | null>(null);
 
   // image generation states
   const [imgGenLoading, setImgGenLoading] = useState(false);
   const [imgGenErr, setImgGenErr] = useState<string | null>(null);
 
+  // video generation states
+  const [vidGenLoading, setVidGenLoading] = useState(false);
+  const [vidGenErr, setVidGenErr] = useState<string | null>(null);
+
   const isBusy = loading;
   const navigate = useNavigate();
 
-  // Start/stop the stopwatch whenever loading toggles
   useEffect(() => {
     if (loading) {
       const start = Date.now();
@@ -102,7 +113,7 @@ export default function NewBlogContents() {
     }
   }, [loading]);
 
-  // === helper: call image generation API and update out.image_url
+  /** ========= IMAGE: generate then persist ========= */
   async function generateImageForId(customerId: number, generationId: number) {
     try {
       setImgGenErr(null);
@@ -136,11 +147,19 @@ export default function NewBlogContents() {
         data?.data?.url ??
         null;
 
+      // Update UI
       if (typeof newUrl === "string" && newUrl) {
         setOut((prev) => ({ ...prev, image_url: newUrl }));
-      } else {
-        // backend may have persisted URL without returning it; we can ignore or optionally fetch the row
-        // no-op here; your details page will show it regardless
+        setImgSrcUrl(newUrl);
+      }
+
+      // Persist image_url (safe even if backend already saved it)
+      if (typeof newUrl === "string" && newUrl && generationId) {
+        await fetch(`${API_BASE_URL}/content-generations/${generationId}`, {
+          method: "PUT",
+          headers: { ...baseJsonHeaders, ...authHeader() },
+          body: JSON.stringify({ image_url: newUrl }),
+        }).catch(() => {});
       }
     } catch (e: any) {
       setImgGenErr(e?.message || "Image generation failed");
@@ -149,10 +168,81 @@ export default function NewBlogContents() {
     }
   }
 
+  /** ========= VIDEO: generate then persist job/status/url ========= */
+  async function generateVideoForId(
+    customerId: number,
+    generationId: number,
+    scriptFromStart?: string
+  ) {
+    try {
+      setVidGenErr(null);
+      setVidGenLoading(true);
+
+      // If you want to force a script, include it in body; otherwise backend will read gen->video_script
+      const resp = await fetch(
+        `${API_BASE_URL}/customers/${customerId}/contents/${generationId}/make-video`,
+        {
+          method: "POST",
+          headers: { ...baseJsonHeaders, ...authHeader() },
+          body:
+            scriptFromStart && scriptFromStart.trim().length
+              ? JSON.stringify({ script: scriptFromStart })
+              : undefined,
+        }
+      );
+
+      if (!resp.ok) {
+        let msg = "Failed to generate video.";
+        try {
+          const j = await resp.json();
+          msg = (j as any)?.message || msg;
+        } catch {
+          msg = (await resp.text()) || msg;
+        }
+        throw new Error(msg);
+      }
+
+      const data = (await resp.json()) as MakeVideoResponse;
+
+      const videoUrl =
+        data?.video_url ??
+        data?.data?.video_url ??
+        null;
+
+      const jobId = (data as any)?.job_id ?? null;
+      const status = (data as any)?.status ?? null;
+
+      // Update UI
+      if (typeof videoUrl === "string" && videoUrl) {
+        setVidSrcUrl(videoUrl);
+        setOut((prev) => ({ ...prev, /* keep outputs separate */ }));
+      }
+
+      // Persist job + status (+ url if present)
+      const payload: Record<string, any> = {};
+      if (jobId) payload.blotato_video_id = jobId;
+      if (status) payload.blotato_video_status = status;
+      if (videoUrl) payload.video_url = videoUrl;
+
+      if (Object.keys(payload).length) {
+        await fetch(`${API_BASE_URL}/content-generations/${generationId}`, {
+          method: "PUT",
+          headers: { ...baseJsonHeaders, ...authHeader() },
+          body: JSON.stringify(payload),
+        }).catch(() => {});
+      }
+    } catch (e: any) {
+      setVidGenErr(e?.message || "Video generation failed");
+    } finally {
+      setVidGenLoading(false);
+    }
+  }
+
+  /** ========= Start pipeline: then image → video ========= */
   async function handleStartFromBlog() {
     setErr(null);
     setOut({});
-    setGenId(null); // reset previous id
+    setGenId(null);
     setLastDurationMs(null);
     setLoading(true);
 
@@ -179,7 +269,7 @@ export default function NewBlogContents() {
           const j = await res.json();
           msg = (j as any)?.message || msg;
         } catch {
-        msg = (await res.text()) || msg;
+          msg = (await res.text()) || msg;
         }
         throw new Error(msg);
       }
@@ -187,7 +277,7 @@ export default function NewBlogContents() {
       const json = (await res.json()) as StartResponse; // { id, message, outputs }
       setOut(json.outputs || {});
 
-      // Normalize & capture id
+      // capture id
       let newId: number | null = null;
       if (json.id !== undefined && json.id !== null) {
         const n = Number(json.id);
@@ -195,9 +285,17 @@ export default function NewBlogContents() {
         setGenId(newId);
       }
 
-      // === NEW: kick off image generation right away if we have an id
+      // grab the script returned by start (to eliminate timing issues)
+      const scriptFromStart = (json.outputs?.video_script ?? "").trim();
+
+      // === 1) Generate Image
       if (newId) {
         await generateImageForId(body.customer_id, newId);
+      }
+
+      // === 2) Immediately Generate Video (only if we have an id and a script)
+      if (newId && scriptFromStart.length > 0) {
+        await generateVideoForId(body.customer_id, newId, scriptFromStart);
       }
     } catch (e: any) {
       setErr(e?.message || "Something went wrong.");
@@ -220,7 +318,6 @@ export default function NewBlogContents() {
         Toma <span className="font-bold">Blog</span> Automation
       </h1>
 
-      {/* Wrapper with overlay lock */}
       <div className="relative w-full max-w-6xl">
         {isBusy && (
           <div
@@ -231,7 +328,7 @@ export default function NewBlogContents() {
         )}
 
         <div className={`space-y-6 ${isBusy ? "opacity-60" : ""}`} aria-busy={isBusy}>
-          {/* ROW 1: Blog URL + Start */}
+          {/* ROW 1 */}
           <div className="grid md:grid-cols-3 gap-4 items-stretch">
             <input
               type="text"
@@ -275,7 +372,7 @@ export default function NewBlogContents() {
             </button>
           </div>
 
-          {/* Sub-row: live timer + last run + id chip + image gen chip */}
+          {/* chips */}
           <div className="flex flex-wrap items-center gap-3 text-sm">
             {loading && (
               <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
@@ -292,6 +389,17 @@ export default function NewBlogContents() {
             {imgGenErr && !imgGenLoading && (
               <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200">
                 Image error: {imgGenErr}
+              </span>
+            )}
+            {vidGenLoading && (
+              <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                <span className="h-2.5 w-2.5 rounded-full bg-indigo-500 animate-pulse" />
+                Generating video…
+              </span>
+            )}
+            {vidGenErr && !vidGenLoading && (
+              <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200">
+                Video error: {vidGenErr}
               </span>
             )}
             {lastDurationMs !== null && !loading && (
@@ -313,18 +421,15 @@ export default function NewBlogContents() {
             </div>
           )}
 
-          {/* ROW 2: Left two dashed boxes, right output links + note */}
+          {/* layout */}
           <div className="grid md:grid-cols-3 gap-4">
-            {/* left 2 cols = two dashed cards */}
             <div className="md:col-span-2 grid sm:grid-cols-2 gap-4">
-              {/* Summary */}
               <div className="border-2 border-dashed border-gray-300 rounded-lg h-64 p-4 overflow-auto">
                 <div className="text-xs font-semibold text-gray-500 mb-2">Summary</div>
                 <div className="text-sm text-gray-800 whitespace-pre-wrap">
                   {out.summary || "Summary Output Goes Here"}
                 </div>
               </div>
-              {/* Video Script */}
               <div className="border-2 border-dashed border-gray-300 rounded-lg h-64 p-4 overflow-auto">
                 <div className="text-xs font-semibold text-gray-500 mb-2">Video Script</div>
                 <div className="text-sm text-gray-800 whitespace-pre-wrap">
@@ -333,9 +438,7 @@ export default function NewBlogContents() {
               </div>
             </div>
 
-            {/* right column */}
             <div className="space-y-4">
-              {/* Image URL button (link) */}
               <a
                 href={out.image_url || "#"}
                 target="_blank"
@@ -346,28 +449,17 @@ export default function NewBlogContents() {
                   {out.image_url ? "Open Generated Image" : "Image Output URL Here"}
                 </div>
                 <div className="text-xs text-blue-600">
-                  {out.image_url
-                    ? "Click to view/download image"
-                    : "Click URL link to see image"}
+                  {out.image_url ? "Click to view/download image" : "Click URL link to see image"}
                 </div>
               </a>
 
-              {/* Tiny preview if image_url exists */}
               {out.image_url && (
                 <div className="w-full border border-gray-200 rounded-md p-2">
-                  <img
-                    src={out.image_url}
-                    alt="Generated preview"
-                    className="w-full h-auto rounded"
-                  />
+                  <img src={out.image_url} alt="Generated preview" className="w-full h-auto rounded" />
                 </div>
               )}
 
-              {/* (Optional) placeholder for future video URL */}
-              <button
-                className="w-full bg-white border border-gray-300 rounded-md py-3 px-4 text-center shadow-sm hover:bg-gray-50"
-                disabled
-              >
+              <button className="w-full bg-white border border-gray-300 rounded-md py-3 px-4 text-center shadow-sm hover:bg-gray-50" disabled>
                 <div className="text-gray-700 font-medium">Video Output Url Here</div>
                 <div className="text-xs text-blue-600">Click URL link to see video</div>
               </button>
@@ -378,12 +470,10 @@ export default function NewBlogContents() {
             </div>
           </div>
 
-          
-          {/* ROW 5: Next button aligned right */}
           <div className="flex">
             <button
               onClick={handleGoNext}
-              disabled={!genId || loading || imgGenLoading}
+              disabled={!genId || loading || imgGenLoading || vidGenLoading}
               className="ml-auto bg-teal-500 text-white px-8 py-2 rounded-md hover:bg-teal-600 disabled:opacity-50 disabled:cursor-not-allowed"
               title={!genId ? "Generate content first to get an ID" : "Go to details"}
             >
@@ -393,7 +483,6 @@ export default function NewBlogContents() {
         </div>
       </div>
 
-      {/* Floating timer chip */}
       {isBusy && (
         <div className="fixed bottom-4 right-4 bg-white border border-teal-200 text-teal-700 px-3 py-2 rounded shadow">
           Running • {formatDuration(elapsedMs)}
