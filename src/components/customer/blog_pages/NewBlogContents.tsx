@@ -308,7 +308,7 @@ export default function NewBlogContents() {
 
   const handleGoNext = () => {
     if (!genId) return;
-    navigate(`/customer/blog/post/${genId}`);
+    navigate(`/customer/blog/view/${genId}`);
   };
 
   return (
@@ -459,10 +459,6 @@ export default function NewBlogContents() {
                 </div>
               )}
 
-              <button className="w-full bg-white border border-gray-300 rounded-md py-3 px-4 text-center shadow-sm hover:bg-gray-50" disabled>
-                <div className="text-gray-700 font-medium">Video Output Url Here</div>
-                <div className="text-xs text-blue-600">Click URL link to see video</div>
-              </button>
 
               <p className="text-[11px] text-gray-500 pl-1 text-center">
                 **it 4 or 5 min to produce the video**
@@ -471,6 +467,7 @@ export default function NewBlogContents() {
           </div>
 
           <div className="flex">
+            <p className="font-bold text-right">Click Here or Click Next to see and edit social media output, while you wait for the video to finish being built.</p>
             <button
               onClick={handleGoNext}
               disabled={!genId || loading || imgGenLoading || vidGenLoading}

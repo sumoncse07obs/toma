@@ -785,7 +785,17 @@ export default function BlogContentsDetails() {
                   rel="noreferrer"
                   className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded"
                 >
-                  Open
+                  View Video
+                </a>
+              ) : null}
+              {content.video_url ? (
+                <a
+                  href={'https://my.blotato.com/videos'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded"
+                >
+                  Edit Video
                 </a>
               ) : null}
             </div>
