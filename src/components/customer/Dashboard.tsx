@@ -22,7 +22,7 @@ export default function Dashboard() {
       <section className="mt-16 mb-4">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Link
-            to="/customer/blog/list"
+            to="/customer/blog/new"
             className="rounded-xl bg-sky-600 text-white px-4 py-5 text-center font-semibold shadow hover:opacity-90"
           >
             <div>Blog</div>
