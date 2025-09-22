@@ -1,3 +1,4 @@
+// src/components/customer/BlogContentsDetails.tsx
 import React from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { currentUser, isAuthed, refreshUser, type User } from "@/components/auth";
@@ -58,6 +59,11 @@ type ContentGeneration = {
   pinterest_description: string | null;
 
   video_url: string | null;
+
+  /** NEW: Blotato tracking fields */
+  blotato_video_id?: string | null;
+  blotato_video_status?: string | null;
+  blotato_video_checked_at?: string | null;
 
   created_at?: string;
   updated_at?: string;
@@ -385,6 +391,31 @@ export default function BlogContentsDetails() {
         resp?.data?.url ??
         null;
 
+      // NEW: capture Blotato job id + status and persist immediately
+      const jobId = resp?.job_id ?? null;
+      const status = resp?.status ?? null;
+
+      if (jobId || status) {
+        await api(`/content-generations/${content.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            blotato_video_id: jobId,
+            blotato_video_status: status,
+          }),
+        });
+
+        setContent((prev) =>
+          prev
+            ? ({
+                ...prev,
+                blotato_video_id: jobId ?? prev.blotato_video_id ?? null,
+                blotato_video_status: status ?? prev.blotato_video_status ?? null,
+                updated_at: new Date().toISOString(),
+              } as ContentGeneration)
+            : prev
+        );
+      }
+
       if (typeof newUrl === "string" && newUrl.length > 0) {
         setContent((prev) =>
           prev
@@ -396,7 +427,7 @@ export default function BlogContentsDetails() {
             : prev
         );
       } else {
-        // If only job_id returned, just reload for now (or you can add polling later)
+        // If only job_id/status returned, refresh to show latest server values
         await loadContent();
       }
     } catch (e: any) {
@@ -523,7 +554,7 @@ export default function BlogContentsDetails() {
             </a>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-y-2 gap-x-6 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-y-2 gap-x-6 text-sm">
             <div>
               <span className="text-gray-600">Status:</span>
               <span className="ml-2 font-medium">{content.status}</span>
@@ -547,6 +578,23 @@ export default function BlogContentsDetails() {
             <div>
               <span className="text-gray-600">Updated:</span>
               <span className="ml-2">{fmt(content.updated_at || null)}</span>
+            </div>
+
+            {/* NEW: Blotato job tracking */}
+            <div className="col-span-1 sm:col-span-2 lg:col-span-2">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-600">Blotato Job ID:</span>
+                <span className="ml-1 break-all">{content.blotato_video_id || "—"}</span>
+                {content.blotato_video_id ? (
+                  <span className="ml-1 inline-block">
+                    <CopyBtn value={content.blotato_video_id} />
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div>
+              <span className="text-gray-600">Blotato Status:</span>
+              <span className="ml-2">{content.blotato_video_status || "—"}</span>
             </div>
           </div>
         </div>
@@ -643,6 +691,15 @@ export default function BlogContentsDetails() {
             saveStates={saveStates}
             setSaveStates={setSaveStates}
           />
+          <div className="mt-2 text-xs text-gray-600">
+            Do not like this image? Want to upload your image ?{" "}
+            <Link
+              to={`/customer/blog/posttoblotato/${content.id}`}
+              className="text-blue-600 hover:text-blue-700 underline"
+            >
+              Click here...
+            </Link>
+          </div>
         </div>
 
         {/* Video url + Generate button */}
@@ -695,6 +752,15 @@ export default function BlogContentsDetails() {
             saveStates={saveStates}
             setSaveStates={setSaveStates}
           />
+          <div className="mt-2 text-xs text-gray-600">
+            Do not like this video? Want to upload your video ?{" "}
+            <Link
+              to={`/customer/blog/posttoblotato/${content.id}`}
+              className="text-blue-600 hover:text-blue-700 underline"
+            >
+              Click here...
+            </Link>
+          </div>
         </div>
 
         {/* TikTok */}

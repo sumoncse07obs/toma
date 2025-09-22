@@ -8,6 +8,7 @@ import NewBlogContents from "@/components/customer/blog_pages/NewBlogContents";
 import BlogPost from "@/components/customer/blog_pages/BlogPost";
 import ViewBlogContents from "@/components/customer/blog_pages/ViewBlogContents";
 import Settings from "@/components/customer/SettingsPage";
+import PostToBlotato from "@/components/customer/PostToBlotato";
 
 export default function CustomerRouter() {
   return (
@@ -22,6 +23,7 @@ export default function CustomerRouter() {
         <Route path="/blog/view/:id" element={<ViewBlogContents />} />
         <Route path="/blog/new" element={<NewBlogContents />} />
         <Route path="/blog/post/:id" element={<BlogPost />} />
+        <Route path="/blog/posttoblotato/:id" element={<PostToBlotato />} />
         <Route path="/settings" element={<Settings />} />
         
         {/* future routes: youtube, topic, launch */}

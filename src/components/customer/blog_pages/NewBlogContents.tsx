@@ -378,77 +378,7 @@ export default function NewBlogContents() {
             </div>
           </div>
 
-          {/* ROW 3: centered note */}
-          <p className="text-[13px] text-gray-600 text-center max-w-3xl mx-auto leading-snug">
-            If You Do Not Like The Image Output, You Can Upload Your Own To Your
-            GoHighlevel account, in the media section.
-          </p>
-
-          {/* ROW 4: Left two inputs+Start; right output links + note */}
-          <div className="grid md:grid-cols-3 gap-4 items-start">
-            {/* left side */}
-            <div className="md:col-span-2 flex flex-col gap-4">
-              {/* image source */}
-              <div className="grid grid-cols-3 gap-3">
-                <input
-                  type="text"
-                  placeholder="Put Source URL (Image) Here"
-                  value={imgSrcUrl}
-                  onChange={(e) => setImgSrcUrl(e.target.value)}
-                  className="col-span-2 h-12 border border-gray-300 rounded-md px-4 outline-none focus:ring-2 focus:ring-teal-400"
-                />
-                <button
-                  className="h-12 bg-teal-500 text-white rounded-md hover:bg-teal-600"
-                  disabled
-                >
-                  Start
-                </button>
-              </div>
-
-              {/* video source */}
-              <div className="grid grid-cols-3 gap-3">
-                <input
-                  type="text"
-                  placeholder="Put Source URL (Video) Here"
-                  value={vidSrcUrl}
-                  onChange={(e) => setVidSrcUrl(e.target.value)}
-                  className="col-span-2 h-12 border border-gray-300 rounded-md px-4 outline-none focus:ring-2 focus:ring-teal-400"
-                />
-                <button
-                  className="h-12 bg-teal-500 text-white rounded-md hover:bg-teal-600"
-                  disabled
-                >
-                  Start
-                </button>
-              </div>
-            </div>
-
-            {/* right side */}
-            <div className="space-y-4">
-              <button
-                className="w-full bg-white border border-gray-300 rounded-md py-1 px-4 text-center shadow-sm hover:bg-gray-50"
-                disabled
-              >
-                <div className="text-gray-700 font-medium">Image OutPut Url Here</div>
-                <div className="text-xs text-blue-600">
-                  Click URL link to see image
-                </div>
-              </button>
-              <button
-                className="w-full bg-white border border-gray-300 rounded-md py-1 px-4 text-center shadow-sm hover:bg-gray-50"
-                disabled
-              >
-                <div className="text-gray-700 font-medium">Video OutPut Url Here</div>
-                <div className="text-xs text-blue-600">
-                  Click URL link to see video
-                </div>
-              </button>
-              <p className="text-[11px] text-gray-500 pl-1 text-center">
-                **it 4 or 5 min to produce the video**
-              </p>
-            </div>
-          </div>
-
+          
           {/* ROW 5: Next button aligned right */}
           <div className="flex">
             <button
