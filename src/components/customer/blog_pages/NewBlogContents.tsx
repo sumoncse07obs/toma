@@ -215,7 +215,7 @@ export default function NewBlogContents() {
       // Update UI
       if (typeof videoUrl === "string" && videoUrl) {
         setVidSrcUrl(videoUrl);
-        setOut((prev) => ({ ...prev, /* keep outputs separate */ }));
+        setOut((prev) => ({ ...prev /* keep outputs separate */ }));
       }
 
       // Persist job + status (+ url if present)
@@ -310,6 +310,9 @@ export default function NewBlogContents() {
     if (!genId) return;
     navigate(`/customer/blog/view/${genId}`);
   };
+
+  // Shared readiness gate for "Click Here" and "Next"
+  const canProceed = !!genId && !loading && !imgGenLoading && !vidGenLoading;
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-10 px-4">
@@ -459,18 +462,40 @@ export default function NewBlogContents() {
                 </div>
               )}
 
-
               <p className="text-[11px] text-gray-500 pl-1 text-center">
                 **it 4 or 5 min to produce the video**
               </p>
             </div>
           </div>
 
-          <div className="flex">
-            <p className="font-bold text-right">Click Here or Click Next to see and edit social media output, while you wait for the video to finish being built.</p>
+          {/* Action row with clickable "Click Here" */}
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-gray-800">
+              <span className="font-semibold">
+                {canProceed ? (
+                  <button
+                    onClick={handleGoNext}
+                    className="text-teal-600 underline hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-teal-400 rounded"
+                    role="link"
+                  >
+                    Click Here
+                  </button>
+                ) : (
+                  <span
+                    className="text-gray-400 underline decoration-dotted cursor-not-allowed"
+                    aria-disabled="true"
+                    title="Generate content first to enable"
+                  >
+                    Click Here
+                  </span>
+                )}
+              </span>{" "}
+              or Click Next to see and edit social media output, while you wait for the video to finish being built.
+            </p>
+
             <button
               onClick={handleGoNext}
-              disabled={!genId || loading || imgGenLoading || vidGenLoading}
+              disabled={!canProceed}
               className="ml-auto bg-teal-500 text-white px-8 py-2 rounded-md hover:bg-teal-600 disabled:opacity-50 disabled:cursor-not-allowed"
               title={!genId ? "Generate content first to get an ID" : "Go to details"}
             >

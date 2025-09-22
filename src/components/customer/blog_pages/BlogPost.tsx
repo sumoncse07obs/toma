@@ -1,6 +1,6 @@
 // src/components/user/BlogPost.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { currentUser } from "@/components/auth";
 
 type PostType = "text" | "image" | "video";
@@ -137,7 +137,7 @@ const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: Fiel
     image: { title: "x_title",                content: "x_content" },
     video: { title: "x_video_title",          content: "x_video_content" },
   },
-  Reals: { text: {}, image: {}, video: {} },
+  Reals: { text: {}, image: {}, video: {} }, // UI-only "Reels" option
   "Tick Tok": {
     text:  { title: "tiktok_video_title",     content: "tiktok_video_content" },
     image: { title: "tiktok_video_title",     content: "tiktok_video_content" },
@@ -195,6 +195,8 @@ const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : "�
 
 export default function BlogPost() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -278,6 +280,7 @@ export default function BlogPost() {
     }
   }
 
+  // debounce save on change
   useEffect(() => {
     if (!record?.id) return;
     const trimmed = (videoUrl ?? "").trim();
@@ -445,7 +448,7 @@ export default function BlogPost() {
 
     const body = {
       content_generation_id: record.id,
-      customer_id: getCustomerIdFromAuth(),
+      customer_id: customerId,
       platform: platformKey,
       post_type: post_type_normalized,
       posted_media: platformKey,
@@ -483,30 +486,26 @@ export default function BlogPost() {
   if (loading) return <div className="p-6">Loading post…</div>;
   if (loadError) return <div className="p-6 text-red-600">Failed to load: {loadError}</div>;
 
-  const statusColor =
-    publishStatus === "posted" ? "text-green-600" :
-    publishStatus === "failed" ? "text-red-600" :
-    publishStatus === "queued" ? "text-amber-600" : "text-gray-500";
-
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-8 px-4">
       {/* Header */}
       <h1 className="text-xl font-semibold mb-2">
         Toma <span className="font-bold">Blog</span> Automation
       </h1>
-      <div className="text-xs text-gray-500 mb-4">
-        Customer ID: <span className="font-medium">{getCustomerIdFromAuth()}</span> • Content ID:{" "}
+      {/*<div className="text-xs text-gray-500 mb-4">
+        Customer ID: <span className="font-medium">{customerId}</span> • Content ID:{" "}
         <span className="font-medium">{record?.id}</span>
-      </div>
+      </div> */}
 
+      {/* Back button */}
       <button
         className="mb-6 bg-teal-500 text-white px-6 py-2 rounded-md hover:bg-teal-600"
         onClick={() => {
-          const target = record?.video_url || videoUrl || record?.image_url || "#";
-          if (target && target !== "#") window.open(target, "_blank");
+          const targetId = record?.id ?? (id ? parseInt(id, 10) : null);
+          if (targetId) navigate(`/customer/blog/view/${targetId}`);
         }}
       >
-        Click Here to Goto Blotato and edit the video
+        Back
       </button>
 
       {/* Video URL row */}
