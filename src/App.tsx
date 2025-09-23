@@ -1,17 +1,19 @@
 // src/App.tsx
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";  // 👈 styles
 
 import Home from "@/components/Home";
-import UserRouter from "@/components/user";       // /dashboard/*
-import AdminRouter from "@/components/admin";     // /admin/*
-import CustomerRouter from "@/components/customer"; // /customer/*
-import { 
-  isAuthed, 
-  isAdmin, 
-  isCustomer, 
-  isRegularUser, 
-  getDashboardRoute 
+import UserRouter from "@/components/user";
+import AdminRouter from "@/components/admin";
+import CustomerRouter from "@/components/customer";
+import {
+  isAuthed,
+  isAdmin,
+  isCustomer,
+  isRegularUser,
+  getDashboardRoute
 } from "@/components/auth";
 
 // Protects routes that require authentication
@@ -71,7 +73,7 @@ export default function App() {
           }
         />
 
-        {/* User area - only for regular users */}
+        {/* User area */}
         <Route
           path="/dashboard/*"
           element={
@@ -81,7 +83,7 @@ export default function App() {
           }
         />
 
-        {/* Customer area - only for customers */}
+        {/* Customer area */}
         <Route
           path="/customer/*"
           element={
@@ -91,7 +93,7 @@ export default function App() {
           }
         />
 
-        {/* Admin area - only for admins */}
+        {/* Admin area */}
         <Route
           path="/admin/*"
           element={
@@ -101,12 +103,15 @@ export default function App() {
           }
         />
 
-        {/* Catch-all: send users to their appropriate dashboard or home */}
+        {/* Catch-all */}
         <Route
           path="*"
           element={<Navigate to={getDashboardRoute()} replace />}
         />
       </Routes>
+
+      {/* 👇 Add this once, outside of <Routes> */}
+      <ToastContainer position="bottom-center" autoClose={5000} />
     </BrowserRouter>
   );
 }

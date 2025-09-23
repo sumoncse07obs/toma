@@ -1,5 +1,6 @@
 // src/components/customer/BlogContentsDetails.tsx
-import React from "react";
+import React, { useEffect } from "react";
+import { toast } from "react-toastify";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { currentUser, isAuthed, refreshUser, type User } from "@/components/auth";
 
@@ -60,24 +61,46 @@ type ContentGeneration = {
 
   video_url: string | null;
 
-  /** NEW: Blotato tracking fields */
+  /** Blotato tracking fields */
   blotato_video_id?: string | null;
   blotato_video_status?: string | null;
   blotato_video_checked_at?: string | null;
 
-  created_at?: string;
-  updated_at?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`;
 const TOKEN_KEY = "toma_token";
 
+/** --------- Helpers --------- */
 function fmt(ts: string | null) {
   if (!ts) return "—";
   return new Date(ts).toLocaleString();
 }
 function cls(...xs: Array<string | null | false | undefined>) {
   return xs.filter(Boolean).join(" ");
+}
+/** MySQL DATETIME (UTC): YYYY-MM-DD HH:MM:SS */
+function toMySQLDateTimeUTC(d = new Date()) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const yyyy = d.getUTCFullYear();
+  const mm = pad(d.getUTCMonth() + 1);
+  const dd = pad(d.getUTCDate());
+  const HH = pad(d.getUTCHours());
+  const MM = pad(d.getUTCMinutes());
+  const SS = pad(d.getUTCSeconds());
+  return `${yyyy}-${mm}-${dd} ${HH}:${MM}:${SS}`;
+}
+function fmtElapsed(ms: number) {
+  if (ms < 0) ms = 0;
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h > 0) return `${h}h ${m}m ${ss}s`;
+  if (m > 0) return `${m}m ${ss}s`;
+  return `${ss}s`;
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -92,6 +115,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
+    mode: "cors",
     ...init,
   });
 
@@ -162,7 +186,7 @@ function AutoField(props: {
 
   const scheduleSave = React.useCallback(
     (next: string) => {
-      setContent((prev) => (prev ? { ...prev, [field]: next } as ContentGeneration : prev));
+      setContent((prev) => (prev ? ({ ...prev, [field]: next } as ContentGeneration) : prev));
       setSaveStates((s) => ({ ...s, [field as string]: "saving" }));
 
       if (timersRef.current[field as string]) {
@@ -230,9 +254,7 @@ function AutoField(props: {
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <h3 className="font-medium">{label}</h3>
-          {pill && (
-            <span className={cls("text-xs rounded-full px-2 py-0.5", pillCls)}>{pill}</span>
-          )}
+          {pill && <span className={cls("text-xs rounded-full px-2 py-0.5", pillCls)}>{pill}</span>}
         </div>
         <div className="flex items-center gap-2">
           {saveStates[field as string] === "error" && (
@@ -280,6 +302,10 @@ export default function BlogContentsDetails() {
   const [genVidLoading, setGenVidLoading] = React.useState(false);
   const [genVidErr, setGenVidErr] = React.useState<string | null>(null);
 
+  // Live timer while polling Blotato
+  const [pollStartAt, setPollStartAt] = React.useState<number | null>(null);
+  const [elapsedMs, setElapsedMs] = React.useState(0);
+
   React.useEffect(() => {
     const currentUserData = currentUser();
     if (currentUserData) {
@@ -290,6 +316,119 @@ export default function BlogContentsDetails() {
       });
     }
   }, []);
+
+  // Start/stop the visible timer when we have a job but no video yet
+  useEffect(() => {
+    const needsTimer = !!content?.blotato_video_id && !content?.video_url;
+    if (needsTimer && pollStartAt == null) {
+      setPollStartAt(Date.now());
+    }
+    if (!needsTimer) {
+      setPollStartAt(null);
+      setElapsedMs(0);
+    }
+  }, [content?.blotato_video_id, content?.video_url, pollStartAt]);
+
+  useEffect(() => {
+    if (pollStartAt == null) return;
+    let t: number | null = null;
+    const tick = () => setElapsedMs(Date.now() - pollStartAt);
+    tick();
+    t = window.setInterval(tick, 1000);
+    return () => {
+      if (t) window.clearInterval(t);
+    };
+  }, [pollStartAt]);
+
+  // Poll /check-video and persist status every time
+  useEffect(() => {
+    if (!content) return;
+    if (content.video_url) return; // already ready
+
+    let stopped = false;
+    let timer: number | null = null;
+
+    const poll = async () => {
+      if (stopped || !content) return;
+
+      // optimistic UI
+      setContent((prev) =>
+        prev
+          ? ({ ...prev, blotato_video_status: prev.blotato_video_status || "checking…" } as ContentGeneration)
+          : prev
+      );
+
+      try {
+        const suffix = content.blotato_video_id
+          ? `?job_id=${encodeURIComponent(content.blotato_video_id)}`
+          : "";
+
+        const resp = await api<any>(
+          `/customers/${content.customer_id}/contents/${content.id}/check-video${suffix}`
+        );
+
+        const videoUrl: string | null = resp?.video_url ?? resp?.data?.video_url ?? null;
+        const status: string | null = resp?.status ?? null;
+        const jobId: string | null = resp?.job_id ?? content.blotato_video_id ?? null;
+
+        const checkedAt = toMySQLDateTimeUTC();
+
+        // Persist server-side so other tabs see it
+        try {
+          await api(`/content-generations/${content.id}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              blotato_video_id: jobId,
+              blotato_video_status: status ?? (videoUrl ? "completed" : "checking"),
+              blotato_video_checked_at: checkedAt,
+              ...(videoUrl ? { video_url: videoUrl } : {}),
+            }),
+          });
+        } catch {
+          // ignore write errors; UI still updates locally
+        }
+
+        // Reflect locally
+        setContent((prev) =>
+          prev
+            ? ({
+                ...prev,
+                blotato_video_id: jobId,
+                blotato_video_status: status ?? (videoUrl ? "completed" : prev.blotato_video_status ?? "checking"),
+                blotato_video_checked_at: checkedAt,
+                ...(videoUrl ? { video_url: videoUrl } : {}),
+                updated_at: checkedAt,
+              } as ContentGeneration)
+            : prev
+        );
+
+        // If ready, stop
+        if (videoUrl) {
+          toast.success(
+            <a href={videoUrl} target="_blank" rel="noreferrer">
+              🎉 Your video is ready! Click to view.
+            </a>
+          );
+          if (timer) window.clearInterval(timer);
+          timer = null;
+          stopped = true;
+          return;
+        }
+      } catch {
+        // soft fail; keep polling
+      }
+    };
+
+    // kick once, then poll
+    poll();
+    timer = window.setInterval(poll, 15000);
+
+    return () => {
+      stopped = true;
+      if (timer) window.clearInterval(timer);
+      timer = null;
+    };
+  }, [content?.id, content?.customer_id, content?.blotato_video_id, content?.video_url]);
 
   const loadContent = React.useCallback(async () => {
     if (!id || !user) return;
@@ -327,9 +466,10 @@ export default function BlogContentsDetails() {
       body: JSON.stringify({ [field]: value }),
     });
 
+    const updatedAt = toMySQLDateTimeUTC();
     setContent((prev) =>
       prev
-        ? ({ ...prev, [field]: value, updated_at: new Date().toISOString() } as ContentGeneration)
+        ? ({ ...prev, [field]: value, updated_at: updatedAt } as ContentGeneration)
         : prev
     );
   }
@@ -346,11 +486,9 @@ export default function BlogContentsDetails() {
       );
 
       const newUrl =
-        resp?.image_url ??
-        resp?.data?.image_url ??
-        resp?.url ??
-        resp?.data?.url ??
-        null;
+        resp?.image_url ?? resp?.data?.image_url ?? resp?.url ?? resp?.data?.url ?? null;
+
+      const updatedAt = toMySQLDateTimeUTC();
 
       if (typeof newUrl === "string" && newUrl.length > 0) {
         setContent((prev) =>
@@ -358,7 +496,7 @@ export default function BlogContentsDetails() {
             ? ({
                 ...prev,
                 image_url: newUrl,
-                updated_at: new Date().toISOString(),
+                updated_at: updatedAt,
               } as ContentGeneration)
             : prev
         );
@@ -385,44 +523,42 @@ export default function BlogContentsDetails() {
       );
 
       const newUrl =
-        resp?.video_url ??
-        resp?.data?.video_url ??
-        resp?.url ??
-        resp?.data?.url ??
-        null;
+        resp?.video_url ?? resp?.data?.video_url ?? resp?.url ?? resp?.data?.url ?? null;
 
       // capture job id + status and persist immediately
       const jobId = resp?.job_id ?? null;
-      const status = resp?.status ?? null;
+      const status = resp?.status ?? "queued";
+      const checkedAt = toMySQLDateTimeUTC();
 
-      if (jobId || status) {
-        await api(`/content-generations/${content.id}`, {
-          method: "PUT",
-          body: JSON.stringify({
-            blotato_video_id: jobId,
-            blotato_video_status: status,
-          }),
-        });
+      await api(`/content-generations/${content.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          blotato_video_id: jobId,
+          blotato_video_status: status,
+          blotato_video_checked_at: checkedAt,
+        }),
+      });
 
-        setContent((prev) =>
-          prev
-            ? ({
-                ...prev,
-                blotato_video_id: jobId ?? prev.blotato_video_id ?? null,
-                blotato_video_status: status ?? prev.blotato_video_status ?? null,
-                updated_at: new Date().toISOString(),
-              } as ContentGeneration)
-            : prev
-        );
-      }
+      setContent((prev) =>
+        prev
+          ? ({
+              ...prev,
+              blotato_video_id: jobId ?? prev.blotato_video_id ?? null,
+              blotato_video_status: status ?? prev.blotato_video_status ?? null,
+              blotato_video_checked_at: checkedAt,
+              updated_at: checkedAt,
+            } as ContentGeneration)
+          : prev
+      );
 
       if (typeof newUrl === "string" && newUrl.length > 0) {
+        const updatedAt = toMySQLDateTimeUTC();
         setContent((prev) =>
           prev
             ? ({
                 ...prev,
                 video_url: newUrl,
-                updated_at: new Date().toISOString(),
+                updated_at: updatedAt,
               } as ContentGeneration)
             : prev
         );
@@ -437,7 +573,7 @@ export default function BlogContentsDetails() {
     }
   }
 
-  // NEW: manual "Check Status" button action
+  // Manual "Check Status" button action
   async function checkVideoStatus() {
     if (!content) return;
     try {
@@ -454,22 +590,44 @@ export default function BlogContentsDetails() {
 
       const status = resp?.status ?? null;
       const jobId = resp?.job_id ?? content.blotato_video_id ?? null;
-      const videoUrl =
-        resp?.video_url ??
-        resp?.data?.video_url ??
-        null;
+      const videoUrl = resp?.video_url ?? resp?.data?.video_url ?? null;
+      const checkedAt = toMySQLDateTimeUTC();
 
+      // persist latest status/id/checked_at (and video if ready)
+      try {
+        await api(`/content-generations/${content.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            blotato_video_id: jobId,
+            blotato_video_status: status ?? (videoUrl ? "completed" : "checking"),
+            blotato_video_checked_at: checkedAt,
+            ...(videoUrl ? { video_url: videoUrl } : {}),
+          }),
+        });
+      } catch {}
+
+      // reflect locally
       setContent((prev) =>
         prev
           ? ({
               ...prev,
-              blotato_video_status: status ?? prev.blotato_video_status ?? null,
+              blotato_video_status: status ?? prev.blotato_video_status ?? "checking",
               blotato_video_id: jobId,
-              video_url: typeof videoUrl === "string" && videoUrl.length > 0 ? videoUrl : prev.video_url,
-              updated_at: new Date().toISOString(),
+              video_url:
+                typeof videoUrl === "string" && videoUrl.length > 0 ? videoUrl : prev.video_url,
+              blotato_video_checked_at: checkedAt,
+              updated_at: checkedAt,
             } as ContentGeneration)
           : prev
       );
+
+      if (videoUrl) {
+        toast.success(
+          <a href={videoUrl} target="_blank" rel="noreferrer">
+            🎬 Video is ready — open it
+          </a>
+        );
+      }
     } catch (e: any) {
       setGenVidErr(e?.message || "Failed to check video status");
     } finally {
@@ -543,18 +701,28 @@ export default function BlogContentsDetails() {
               Reload
             </button>
 
-            <Link
-              to={`/customer/blog/post/${content.id}`}
-              className="text-xs px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
-            >
-              Continue to post →
-            </Link>
+            {content.video_url ? (
+              <Link
+                to={`/customer/blog/post/${content.id}`}
+                className="text-xs px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+              >
+                Continue to post →
+              </Link>
+            ) : (
+              <button
+                disabled
+                className="text-xs px-3 py-1 rounded bg-gray-300 text-gray-500 cursor-not-allowed"
+                title="Video not ready yet"
+              >
+                Continue to post →
+              </button>
+            )}
           </div>
         </div>
 
         <div>
           <h1 className="text-2xl font-bold mb-2">{content.title || "Untitled Content"}</h1>
-          <div className="flex items-center gap-4 text-sm text-gray-600">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
             <span>ID: {content.id}</span>
             <span
               className={cls(
@@ -568,6 +736,21 @@ export default function BlogContentsDetails() {
             >
               {content.status}
             </span>
+
+            {/* Live poll indicator (only when waiting for Blotato) */}
+            {content.blotato_video_id && !content.video_url && (
+              <span className="inline-flex items-center gap-2 text-xs rounded-full bg-blue-50 text-blue-700 px-2 py-1">
+                <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                Checking Blotato… {content.blotato_video_status || "checking"} • {fmtElapsed(elapsedMs)}
+              </span>
+            )}
+
+            {/* When video exists, show final status */}
+            {content.video_url && (
+              <span className="inline-flex items-center text-xs rounded-full bg-green-50 text-green-700 px-2 py-1">
+                Blotato: {content.blotato_video_status || "completed"}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -635,6 +818,10 @@ export default function BlogContentsDetails() {
             <div>
               <span className="text-gray-600">Blotato Status:</span>
               <span className="ml-2">{content.blotato_video_status || "—"}</span>
+            </div>
+            <div>
+              <span className="text-gray-600">Last Blotato Check:</span>
+              <span className="ml-2">{fmt(content.blotato_video_checked_at || null)}</span>
             </div>
           </div>
         </div>
@@ -732,11 +919,8 @@ export default function BlogContentsDetails() {
             setSaveStates={setSaveStates}
           />
           <div className="mt-2 text-xs text-gray-600">
-            Do not like this image? Want to upload your image ?{" "}
-            <Link
-              to={`/customer/blog/posttoblotato/${content.id}`}
-              className="text-blue-600 hover:text-blue-700 underline"
-            >
+            Do not like this image? Want to upload your image?{" "}
+            <Link to={`/customer/blog/posttoblotato/${content.id}`} className="text-blue-600 hover:text-blue-700 underline">
               Click here...
             </Link>
           </div>
@@ -768,7 +952,7 @@ export default function BlogContentsDetails() {
                 {genVidLoading ? "Generating…" : "Generate Video"}
               </button>
 
-              {/* NEW: Check Status button */}
+              {/* Check Status button */}
               <button
                 className="text-xs px-3 py-1 rounded bg-gray-100 text-gray-800 hover:bg-gray-200 disabled:opacity-50"
                 onClick={checkVideoStatus}
@@ -790,7 +974,7 @@ export default function BlogContentsDetails() {
               ) : null}
               {content.video_url ? (
                 <a
-                  href={'https://my.blotato.com/videos'}
+                  href={"https://my.blotato.com/videos"}
                   target="_blank"
                   rel="noreferrer"
                   className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded"
@@ -815,11 +999,8 @@ export default function BlogContentsDetails() {
           />
 
           <div className="mt-2 text-xs text-gray-600">
-            Do not like this video? Want to upload your video ?{" "}
-            <Link
-              to={`/customer/blog/posttoblotato/${content.id}`}
-              className="text-blue-600 hover:text-blue-700 underline"
-            >
+            Do not like this video? Want to upload your video?{" "}
+            <Link to={`/customer/blog/posttoblotato/${content.id}`} className="text-blue-600 hover:text-blue-700 underline">
               Click here...
             </Link>
           </div>
@@ -960,12 +1141,22 @@ export default function BlogContentsDetails() {
       </div>
 
       <div className="mt-8 flex justify-end">
-        <Link
-          to={`/customer/blog/post/${content.id}`}
-          className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
-        >
-          Continue to post →
-        </Link>
+        {content.video_url ? (
+          <Link
+            to={`/customer/blog/post/${content.id}`}
+            className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+          >
+            Continue to post →
+          </Link>
+        ) : (
+          <button
+            disabled
+            className="px-4 py-2 rounded bg-gray-300 text-gray-500 cursor-not-allowed"
+            title="Video not ready yet"
+          >
+            Continue to post →
+          </button>
+        )}
       </div>
     </div>
   );
