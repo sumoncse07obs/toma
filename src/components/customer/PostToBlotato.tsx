@@ -4,18 +4,29 @@ import { useParams } from "react-router-dom";
 
 const TOKEN_KEY = "toma_token";
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+// 👉 Set VITE_API_BASE in Vercel (e.g. https://api.yourdomain.com)
+const API_HOST = String(import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
+const API = `${API_HOST}/api`;
+
+function norm(path: string) {
   if (!path.startsWith("/")) path = `/${path}`;
-  const url = path.replace(/([^:]\/)\/+/g, "$1");
+  return `${API}${path}`.replace(/([^:]\/)\/+/g, "$1");
+}
+
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = norm(path);
   const token = localStorage.getItem(TOKEN_KEY);
 
   const res = await fetch(url, {
+    method: init?.method || "GET",
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
+    // If you switched to Sanctum cookie auth, also add:
+    // credentials: "include",
     ...init,
   });
 
@@ -46,7 +57,7 @@ export default function PostToBlotato() {
   const [vidErr, setVidErr] = useState<string | null>(null);
 
   async function handleUpload(kind: "image" | "video") {
-    const val = kind === "image" ? imgSrc.trim() : vidSrc.trim();
+    const val = (kind === "image" ? imgSrc : vidSrc).trim();
     if (!val || !generationId) return;
 
     const setPosting = kind === "image" ? setImgPosting : setVidPosting;
@@ -59,7 +70,7 @@ export default function PostToBlotato() {
       setErr(null);
 
       const json = await api<{ url?: string; data?: { url?: string }; message?: string }>(
-        "/api/blotato/media",
+        "/blotato/media",
         {
           method: "POST",
           body: JSON.stringify({
@@ -138,7 +149,13 @@ export default function PostToBlotato() {
 
         <div className="space-y-4">
           {imgOut ? (
-            <a href={imgOut} target="_blank" rel="noreferrer" className="block w-full bg-white border border-gray-300 rounded-md py-1 px-4 text-center shadow-sm hover:bg-gray-50" title={imgOut}>
+            <a
+              href={imgOut}
+              target="_blank"
+              rel="noreferrer"
+              className="block w-full bg-white border border-gray-300 rounded-md py-1 px-4 text-center shadow-sm hover:bg-gray-50"
+              title={imgOut}
+            >
               <div className="text-gray-700 font-medium break-all">Image Output Url</div>
               <div className="text-xs text-blue-600">Click URL link to see image</div>
             </a>
@@ -150,7 +167,13 @@ export default function PostToBlotato() {
           )}
 
           {vidOut ? (
-            <a href={vidOut} target="_blank" rel="noreferrer" className="block w-full bg-white border border-gray-300 rounded-md py-1 px-4 text-center shadow-sm hover:bg-gray-50" title={vidOut}>
+            <a
+              href={vidOut}
+              target="_blank"
+              rel="noreferrer"
+              className="block w-full bg-white border border-gray-300 rounded-md py-1 px-4 text-center shadow-sm hover:bg-gray-50"
+              title={vidOut}
+            >
               <div className="text-gray-700 font-medium break-all">Video Output Url</div>
               <div className="text-xs text-blue-600">Click URL link to see video</div>
             </a>
