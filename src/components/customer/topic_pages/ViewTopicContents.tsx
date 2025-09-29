@@ -68,6 +68,10 @@ type ContentGeneration = {
 
   created_at?: string | null;
   updated_at?: string | null;
+
+  /** NEW: read-only display fields */
+  topic?: string | null;
+  keywords?: string | null;
 };
 
 const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`;
@@ -142,6 +146,37 @@ function CopyBtn({ value }: { value: string }) {
     >
       Copy
     </button>
+  );
+}
+
+/** NEW: read-only textarea component */
+function ReadonlyField({
+  label,
+  value,
+  rows = 4,
+  copy,
+  className,
+}: {
+  label: string;
+  value?: string | null;
+  rows?: number;
+  copy?: boolean;
+  className?: string;
+}) {
+  const v = value ?? "";
+  return (
+    <div className={cls("bg-white rounded-lg border p-4", className)}>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-medium">{label}</h3>
+        {copy ? <CopyBtn value={v} /> : null}
+      </div>
+      <textarea
+        className="w-full p-2 border rounded text-sm min-h-24 bg-gray-50 text-gray-700"
+        rows={rows}
+        value={v}
+        readOnly
+      />
+    </div>
   );
 }
 
@@ -430,29 +465,64 @@ export default function ViewTopicContents() {
     };
   }, [content?.id, content?.customer_id, content?.blotato_video_id, content?.video_url]);
 
-  const loadContent = React.useCallback(async () => {
-    if (!id || !user) return;
-    try {
-      setLoading(true);
-      setError(null);
+const loadContent = React.useCallback(async () => {
+  if (!id || !user) return;
+  try {
+    setLoading(true);
+    setError(null);
 
-      const res = await api<any>(`/content-generations/${id}`);
+    const res = await api<any>(`/content-generations/${id}`);
 
-      if (res && typeof res === "object") {
-        if (res.data) setContent(res.data);
-        else if (res.id) setContent(res as ContentGeneration);
-        else {
-          setError(`Unexpected API response format. Keys: ${Object.keys(res).join(", ")}`);
-        }
-      } else {
-        setError("API returned empty or invalid response");
-      }
-    } catch (e: any) {
-      setError(e?.message || "Failed to load content details");
-    } finally {
+    // Normalize common API shapes
+    const base: any =
+      res?.data && typeof res.data === "object" ? res.data :
+      res && typeof res === "object" ? res :
+      null;
+
+    if (!base) {
+      setError("API returned empty or invalid response");
       setLoading(false);
+      return;
     }
-  }, [id, user]);
+
+    // Derive topic from several likely fields
+    const derivedTopic: string | null =
+      base.topic ??
+      base.topic_title ??
+      base.youtube_topic ??
+      base.youtube_video_title ??
+      base.subject ??
+      base.title ??
+      null;
+
+    // Derive keywords from likely fields or arrays
+    const arrToCsv = (v: unknown): string | null =>
+      Array.isArray(v) ? v.filter(Boolean).join(", ") : null;
+
+    const derivedKeywords: string | null =
+      base.keywords ??
+      base.topic_keywords ??
+      (typeof base.keywords_csv === "string" ? base.keywords_csv : null) ??
+      arrToCsv(base.keywords_list) ??
+      arrToCsv(base.tags) ??
+      (typeof base.tags === "string" ? base.tags : null) ??
+      null;
+
+    // Merge in the derived values so your read-only fields have something
+    const withDerived = {
+      ...base,
+      topic: derivedTopic,
+      keywords: derivedKeywords,
+    };
+
+    setContent(withDerived as ContentGeneration);
+  } catch (e: any) {
+    setError(e?.message || "Failed to load content details");
+  } finally {
+    setLoading(false);
+  }
+}, [id, user]);
+
 
   React.useEffect(() => {
     if (user && id) loadContent();
@@ -768,9 +838,14 @@ export default function ViewTopicContents() {
 
       {/* Core Content Section */}
       <div className="space-y-6">
+        {/* NEW: Topic & Keywords (read-only) */}
+        <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
+          <ReadonlyField label="Topic" value={content.topic} rows={2} copy />
+          <ReadonlyField label="Keywords" value={content.keywords} rows={1} copy />
+        </div>
+
         {/* Details */}
         <div className="bg-white rounded-lg border p-4">
-
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-y-2 gap-x-6 text-sm">
             <div>
               <span className="text-gray-600">Status:</span>
@@ -797,7 +872,7 @@ export default function ViewTopicContents() {
               <span className="ml-2">{fmt(content.updated_at || null)}</span>
             </div>
 
-            {/* NEW: Blotato job tracking */}
+            {/* Blotato job tracking */}
             <div className="col-span-1 sm:col-span-2 lg:col-span-2">
               <div className="flex items-center gap-2">
                 <span className="text-gray-600">Blotato Job ID:</span>

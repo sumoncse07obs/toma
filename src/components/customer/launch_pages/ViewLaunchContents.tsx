@@ -68,6 +68,9 @@ type ContentGeneration = {
 
   created_at?: string | null;
   updated_at?: string | null;
+
+  /** NEW: read-only display field */
+  launch_content?: string | null;
 };
 
 const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`;
@@ -142,6 +145,37 @@ function CopyBtn({ value }: { value: string }) {
     >
       Copy
     </button>
+  );
+}
+
+/** NEW: read-only textarea component */
+function ReadonlyField({
+  label,
+  value,
+  rows = 6,
+  copy,
+  className,
+}: {
+  label: string;
+  value?: string | null;
+  rows?: number;
+  copy?: boolean;
+  className?: string;
+}) {
+  const v = (value ?? "").trim().length ? (value as string) : "—";
+  return (
+    <div className={cls("bg-white rounded-lg border p-4", className)}>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-medium">{label}</h3>
+        {copy ? <CopyBtn value={value ?? ""} /> : null}
+      </div>
+      <textarea
+        className="w-full p-2 border rounded text-sm min-h-24 bg-gray-50 text-gray-700"
+        rows={rows}
+        value={v}
+        readOnly
+      />
+    </div>
   );
 }
 
@@ -438,15 +472,31 @@ export default function ViewLaunchContents() {
 
       const res = await api<any>(`/content-generations/${id}`);
 
-      if (res && typeof res === "object") {
-        if (res.data) setContent(res.data);
-        else if (res.id) setContent(res as ContentGeneration);
-        else {
-          setError(`Unexpected API response format. Keys: ${Object.keys(res).join(", ")}`);
-        }
-      } else {
+      // Normalize: support both { data: {...} } and flat shape
+      const base: any =
+        res?.data && typeof res.data === "object" ? res.data :
+        res && typeof res === "object" ? res :
+        null;
+
+      if (!base) {
         setError("API returned empty or invalid response");
+        setLoading(false);
+        return;
       }
+
+      // Derive launch_content from likely fields if missing
+      const derivedLaunchContent: string | null =
+        base.launch_content ??
+        base.launch_copy ??
+        base.launch_body ??
+        base.launch_text ??
+        base.description ??
+        null;
+
+      setContent({
+        ...(base as ContentGeneration),
+        launch_content: derivedLaunchContent,
+      });
     } catch (e: any) {
       setError(e?.message || "Failed to load content details");
     } finally {
@@ -768,9 +818,11 @@ export default function ViewLaunchContents() {
 
       {/* Core Content Section */}
       <div className="space-y-6">
+        {/* NEW: Launch Content (read-only) */}
+        <ReadonlyField label="Launch Content" value={content.launch_content} rows={10} copy />
+
         {/* Details */}
         <div className="bg-white rounded-lg border p-4">
-
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-y-2 gap-x-6 text-sm">
             <div>
               <span className="text-gray-600">Status:</span>
@@ -797,7 +849,7 @@ export default function ViewLaunchContents() {
               <span className="ml-2">{fmt(content.updated_at || null)}</span>
             </div>
 
-            {/* NEW: Blotato job tracking */}
+            {/* Blotato job tracking */}
             <div className="col-span-1 sm:col-span-2 lg:col-span-2">
               <div className="flex items-center gap-2">
                 <span className="text-gray-600">Blotato Job ID:</span>
