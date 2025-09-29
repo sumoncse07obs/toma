@@ -1,9 +1,10 @@
+// src/components/customer/NewYoutubeContents.tsx
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { currentUser } from "@/components/auth";
 
-/* ========= CONFIG: change this once per page copy ========= */
-const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "blog";
+/* ========= CONFIG ========= */
+const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "youtube";
 
 /* ========= Types ========= */
 type GenOutputs = {
@@ -74,8 +75,13 @@ function titleCase(s: string) {
   return s.slice(0, 1).toUpperCase() + s.slice(1);
 }
 
-export default function NewContextContents() {
-  const [sourceUrl, setSourceUrl] = useState("");
+function isYouTubeUrl(s: string) {
+  const url = s.trim();
+  return /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(url);
+}
+
+export default function NewYoutubeContents() {
+  const [videoUrl, setVideoUrl] = useState("");
   const [imgSrcUrl, setImgSrcUrl] = useState("");
   const [vidSrcUrl, setVidSrcUrl] = useState("");
 
@@ -131,7 +137,7 @@ export default function NewContextContents() {
         {
           method: "POST",
           headers: { ...baseJsonHeaders, ...authHeader() },
-          // 👇 tell backend which PromptSetting row to use
+          // tell backend which PromptSetting row to use
           body: JSON.stringify({ prompt_for: CONTEXT }),
         }
       );
@@ -243,7 +249,7 @@ export default function NewContextContents() {
     }
   }
 
-  /** ========= Start pipeline: then image → video ========= */
+  /** ========= Start pipeline: call youtubetocontent (video_url) ========= */
   async function handleStartFromContext() {
     setErr(null);
     setOut({});
@@ -253,17 +259,20 @@ export default function NewContextContents() {
 
     const startedAt = Date.now();
     try {
-      const url = sourceUrl.trim();
-      if (!url) throw new Error("Please enter a valid URL.");
+      // if your state is still called `sourceUrl`, just change this to `const raw = sourceUrl.trim();`
+      const raw = videoUrl.trim();
+      if (!raw) throw new Error("Please paste a YouTube video URL.");
+      if (!isYouTubeUrl(raw)) throw new Error("That doesn’t look like a YouTube URL.");
 
       const body = {
         customer_id: getCustomerIdFromAuth(),
-        url,
+        video_url: raw,        // 👈 IMPORTANT: video_url (not url)
         reset: true,
-        prompt_for: CONTEXT, // 👈 required by backend to pick correct prompts
+        prompt_for: CONTEXT,   // 'youtube'
       };
 
-      const res = await fetch(`${API_BASE_URL}/generate-contents`, {
+      // NEW endpoint for the YouTube flow
+      const res = await fetch(`${API_BASE_URL}/generate-contents/youtubetocontent`, {
         method: "POST",
         headers: { ...baseJsonHeaders, ...authHeader() },
         body: JSON.stringify(body),
@@ -273,7 +282,10 @@ export default function NewContextContents() {
         let msg = "Failed to start generation.";
         try {
           const j = await res.json();
+          // surface backend / DumplingAI details if present
           msg = (j as any)?.message || msg;
+          if ((j as any)?.details) msg += ` — ${String((j as any).details)}`;
+          if ((j as any)?.error)   msg += ` — ${String((j as any).error)}`;
         } catch {
           msg = (await res.text()) || msg;
         }
@@ -294,12 +306,12 @@ export default function NewContextContents() {
       // grab the script returned by start (to eliminate timing issues)
       const scriptFromStart = (json.outputs?.video_script ?? "").trim();
 
-      // === 1) Generate Image
+      // 1) Generate Image
       if (newId) {
         await generateImageForId(body.customer_id, newId);
       }
 
-      // === 2) Immediately Generate Video (only if we have an id and a script)
+      // 2) Immediately Generate Video (only if we have an id and a script)
       if (newId && scriptFromStart.length > 0) {
         await generateVideoForId(body.customer_id, newId, scriptFromStart);
       }
@@ -312,22 +324,17 @@ export default function NewContextContents() {
     }
   }
 
+
   const handleGoNext = () => {
     if (!genId) return;
-    // dynamic route based on context, e.g. /customer/blog/view/:id
-    navigate(`/customer/${CONTEXT}/view/${genId}`);
+    navigate(`/customer/${CONTEXT}/view/${genId}`); // /customer/youtube/view/:id
   };
 
   // Shared readiness gate for "Click Here" and "Next"
   const canProceed = !!genId && !loading && !imgGenLoading && !vidGenLoading;
 
   const titleNoun = titleCase(CONTEXT);
-  const inputPlaceholder =
-    CONTEXT === "blog"
-      ? "Put Blog URL Here"
-      : CONTEXT === "youtube"
-      ? "Put YouTube URL Here"
-      : "Put Source URL Here";
+  const inputPlaceholder = "Paste YouTube video URL";
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-10 px-4">
@@ -349,10 +356,10 @@ export default function NewContextContents() {
           {/* ROW 1 */}
           <div className="grid md:grid-cols-3 gap-4 items-stretch">
             <input
-              type="text"
+              type="url"
               placeholder={inputPlaceholder}
-              value={sourceUrl}
-              onChange={(e) => setSourceUrl(e.target.value)}
+              value={videoUrl}
+              onChange={(e) => setVideoUrl(e.target.value)}
               className="md:col-span-2 h-12 border border-gray-300 rounded-md px-4 outline-none focus:ring-2 focus:ring-teal-400"
             />
             <button

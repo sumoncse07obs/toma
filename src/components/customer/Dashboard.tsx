@@ -30,7 +30,7 @@ export default function Dashboard() {
           </Link>
 
           <Link
-            to="/customer/youtube"
+            to="/customer/youtube/new"
             className="rounded-xl bg-sky-600 text-white px-4 py-5 text-center font-semibold shadow hover:opacity-90"
           >
             <div>Youtube</div>
@@ -38,7 +38,7 @@ export default function Dashboard() {
           </Link>
 
           <Link
-            to="/customer/topic"
+            to="/customer/topic/new"
             className="rounded-xl bg-sky-600 text-white px-4 py-5 text-center font-semibold shadow hover:opacity-90"
           >
             <div>Topic</div>
@@ -46,7 +46,7 @@ export default function Dashboard() {
           </Link>
 
           <Link
-            to="/customer/launch"
+            to="/customer/launch/new"
             className="rounded-xl bg-sky-600 text-white px-4 py-5 text-center font-semibold shadow hover:opacity-90"
           >
             <div>Launch</div>

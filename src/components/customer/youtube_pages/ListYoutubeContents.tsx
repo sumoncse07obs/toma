@@ -1,4 +1,4 @@
-// src/components/customer/ListBlogContents.tsx
+// src/components/customer/ListYoutubeContents.tsx
 import React from "react";
 import { currentUser, isAuthed, refreshUser, type User } from "@/components/auth";
 import { Link } from "react-router-dom";
@@ -21,7 +21,7 @@ type Props = {
 };
 
 /* ========= CONFIG: set once here ========= */
-const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "blog";
+const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "youtube";
 
 /* ========= API base =========*/
 const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`;
@@ -70,7 +70,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
+export default function ListYoutubeContents({ customerId, perPage = 10 }: Props) {
   const [user, setUser] = React.useState<User | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -154,10 +154,10 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
   return (
     <div className="p-4 md:p-6">
       <div className="mb-4 flex items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold">Blogs Automation</h1>
+        <h1 className="text-xl font-semibold">Youtube Automation</h1>
         <div className="flex gap-2">
           <Link
-            to="/customer/blog/new"
+            to="/customer/youtube/new"
             className="rounded-lg bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700 transition-colors"
           >
             New Automation

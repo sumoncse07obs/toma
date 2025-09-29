@@ -1,9 +1,10 @@
+// src/components/customer/NewTopicContents.tsx
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { currentUser } from "@/components/auth";
 
 /* ========= CONFIG: change this once per page copy ========= */
-const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "blog";
+const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "topic";
 
 /* ========= Types ========= */
 type GenOutputs = {
@@ -74,11 +75,16 @@ function titleCase(s: string) {
   return s.slice(0, 1).toUpperCase() + s.slice(1);
 }
 
-export default function NewContextContents() {
-  const [sourceUrl, setSourceUrl] = useState("");
+export default function NewTopicContents() {
+  // ✅ Topic + Keywords flow
+  const [topic, setTopic] = useState("");
+  const [keywords, setKeywords] = useState(""); // comma-separated optional
+
+  // media previews
   const [imgSrcUrl, setImgSrcUrl] = useState("");
   const [vidSrcUrl, setVidSrcUrl] = useState("");
 
+  // pipeline state
   const [loading, setLoading] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const timerRef = useRef<number | null>(null);
@@ -88,11 +94,9 @@ export default function NewContextContents() {
   const [out, setOut] = useState<GenOutputs>({});
   const [genId, setGenId] = useState<number | null>(null);
 
-  // image generation states
+  // image/video generation states
   const [imgGenLoading, setImgGenLoading] = useState(false);
   const [imgGenErr, setImgGenErr] = useState<string | null>(null);
-
-  // video generation states
   const [vidGenLoading, setVidGenLoading] = useState(false);
   const [vidGenErr, setVidGenErr] = useState<string | null>(null);
 
@@ -131,8 +135,7 @@ export default function NewContextContents() {
         {
           method: "POST",
           headers: { ...baseJsonHeaders, ...authHeader() },
-          // 👇 tell backend which PromptSetting row to use
-          body: JSON.stringify({ prompt_for: CONTEXT }),
+          body: JSON.stringify({ prompt_for: CONTEXT }), // tell backend which PromptSetting row to use
         }
       );
 
@@ -156,13 +159,11 @@ export default function NewContextContents() {
         data?.data?.url ??
         null;
 
-      // Update UI
       if (typeof newUrl === "string" && newUrl) {
         setOut((prev) => ({ ...prev, image_url: newUrl }));
         setImgSrcUrl(newUrl);
       }
 
-      // Persist image_url (safe even if backend already saved it)
       if (typeof newUrl === "string" && newUrl && generationId) {
         await fetch(`${API_BASE_URL}/content-generations/${generationId}`, {
           method: "PUT",
@@ -187,7 +188,6 @@ export default function NewContextContents() {
       setVidGenErr(null);
       setVidGenLoading(true);
 
-      // If you want to force a script, include it in body; otherwise backend will read gen->video_script
       const resp = await fetch(
         `${API_BASE_URL}/customers/${customerId}/contents/${generationId}/make-video`,
         {
@@ -217,13 +217,11 @@ export default function NewContextContents() {
       const jobId = (data as any)?.job_id ?? null;
       const status = (data as any)?.status ?? null;
 
-      // Update UI
       if (typeof videoUrl === "string" && videoUrl) {
         setVidSrcUrl(videoUrl);
         setOut((prev) => ({ ...prev }));
       }
 
-      // Persist job + status (+ url if present)
       const payload: Record<string, any> = {};
       if (jobId) payload.blotato_video_id = jobId;
       if (status) payload.blotato_video_status = status;
@@ -243,7 +241,7 @@ export default function NewContextContents() {
     }
   }
 
-  /** ========= Start pipeline: then image → video ========= */
+  /** ========= Start pipeline: TOPIC + KEYWORDS ========= */
   async function handleStartFromContext() {
     setErr(null);
     setOut({});
@@ -253,17 +251,24 @@ export default function NewContextContents() {
 
     const startedAt = Date.now();
     try {
-      const url = sourceUrl.trim();
-      if (!url) throw new Error("Please enter a valid URL.");
+      const customer_id = getCustomerIdFromAuth();
+      const topicClean = topic.trim();
+      const keywordsClean = keywords.trim();
 
-      const body = {
-        customer_id: getCustomerIdFromAuth(),
-        url,
+      if (!topicClean) {
+        throw new Error("Please enter a topic.");
+      }
+
+      const body: any = {
+        customer_id,
+        prompt_for: CONTEXT,        // 'topic'
+        topic: topicClean,
+        keywords: keywordsClean || undefined, // optional
         reset: true,
-        prompt_for: CONTEXT, // 👈 required by backend to pick correct prompts
       };
 
-      const res = await fetch(`${API_BASE_URL}/generate-contents`, {
+      // Backend endpoint that handles contentless topic/keywords start
+      const res = await fetch(`${API_BASE_URL}/generate-contents/topictocontent`, {
         method: "POST",
         headers: { ...baseJsonHeaders, ...authHeader() },
         body: JSON.stringify(body),
@@ -296,12 +301,12 @@ export default function NewContextContents() {
 
       // === 1) Generate Image
       if (newId) {
-        await generateImageForId(body.customer_id, newId);
+        await generateImageForId(customer_id, newId);
       }
 
       // === 2) Immediately Generate Video (only if we have an id and a script)
       if (newId && scriptFromStart.length > 0) {
-        await generateVideoForId(body.customer_id, newId, scriptFromStart);
+        await generateVideoForId(customer_id, newId, scriptFromStart);
       }
     } catch (e: any) {
       setErr(e?.message || "Something went wrong.");
@@ -314,7 +319,7 @@ export default function NewContextContents() {
 
   const handleGoNext = () => {
     if (!genId) return;
-    // dynamic route based on context, e.g. /customer/blog/view/:id
+    // /customer/topic/view/:id
     navigate(`/customer/${CONTEXT}/view/${genId}`);
   };
 
@@ -322,12 +327,6 @@ export default function NewContextContents() {
   const canProceed = !!genId && !loading && !imgGenLoading && !vidGenLoading;
 
   const titleNoun = titleCase(CONTEXT);
-  const inputPlaceholder =
-    CONTEXT === "blog"
-      ? "Put Blog URL Here"
-      : CONTEXT === "youtube"
-      ? "Put YouTube URL Here"
-      : "Put Source URL Here";
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-10 px-4">
@@ -346,14 +345,15 @@ export default function NewContextContents() {
         )}
 
         <div className={`space-y-6 ${isBusy ? "opacity-60" : ""}`} aria-busy={isBusy}>
-          {/* ROW 1 */}
-          <div className="grid md:grid-cols-3 gap-4 items-stretch">
-            <input
-              type="text"
-              placeholder={inputPlaceholder}
-              value={sourceUrl}
-              onChange={(e) => setSourceUrl(e.target.value)}
-              className="md:col-span-2 h-12 border border-gray-300 rounded-md px-4 outline-none focus:ring-2 focus:ring-teal-400"
+          {/* ======= INPUTS: Topic (textarea) + Keywords ======= */}
+          <div className="grid md:grid-cols-3 gap-4 items-start">
+            <textarea
+              placeholder="Enter topic (required)…"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              rows={2}
+              className="md:col-span-2 h-40 border border-gray-300 rounded-md px-4 py-3 outline-none focus:ring-2 focus:ring-teal-400 resize-y leading-relaxed"
+              spellCheck
             />
             <button
               onClick={handleStartFromContext}
@@ -389,6 +389,14 @@ export default function NewContextContents() {
               )}
             </button>
           </div>
+
+          <input
+            type="text"
+            placeholder="Keywords (comma-separated, optional)"
+            value={keywords}
+            onChange={(e) => setKeywords(e.target.value)}
+            className="h-12 border border-gray-300 rounded-md px-4 outline-none focus:ring-2 focus:ring-teal-400 w-full"
+          />
 
           {/* chips */}
           <div className="flex flex-wrap items-center gap-3 text-sm">

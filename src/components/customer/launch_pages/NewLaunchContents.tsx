@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { currentUser } from "@/components/auth";
 
-/* ========= CONFIG: change this once per page copy ========= */
-const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "blog";
+/* ========= CONFIG: set this per page copy ========= */
+const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "launch";
 
 /* ========= Types ========= */
 type GenOutputs = {
@@ -74,8 +74,16 @@ function titleCase(s: string) {
   return s.slice(0, 1).toUpperCase() + s.slice(1);
 }
 
-export default function NewContextContents() {
+/** launch uses content; blog/youtube keep URL flow */
+const USES_CONTENT = CONTEXT === "launch";
+
+export default function NewLaunchContents() {
+  // CONTENT for launch
+  const [contentText, setContentText] = useState("");
+
+  // kept for URL flow (blog/youtube)
   const [sourceUrl, setSourceUrl] = useState("");
+
   const [imgSrcUrl, setImgSrcUrl] = useState("");
   const [vidSrcUrl, setVidSrcUrl] = useState("");
 
@@ -88,11 +96,9 @@ export default function NewContextContents() {
   const [out, setOut] = useState<GenOutputs>({});
   const [genId, setGenId] = useState<number | null>(null);
 
-  // image generation states
+  // image/video gen state
   const [imgGenLoading, setImgGenLoading] = useState(false);
   const [imgGenErr, setImgGenErr] = useState<string | null>(null);
-
-  // video generation states
   const [vidGenLoading, setVidGenLoading] = useState(false);
   const [vidGenErr, setVidGenErr] = useState<string | null>(null);
 
@@ -131,7 +137,6 @@ export default function NewContextContents() {
         {
           method: "POST",
           headers: { ...baseJsonHeaders, ...authHeader() },
-          // 👇 tell backend which PromptSetting row to use
           body: JSON.stringify({ prompt_for: CONTEXT }),
         }
       );
@@ -156,13 +161,11 @@ export default function NewContextContents() {
         data?.data?.url ??
         null;
 
-      // Update UI
       if (typeof newUrl === "string" && newUrl) {
         setOut((prev) => ({ ...prev, image_url: newUrl }));
         setImgSrcUrl(newUrl);
       }
 
-      // Persist image_url (safe even if backend already saved it)
       if (typeof newUrl === "string" && newUrl && generationId) {
         await fetch(`${API_BASE_URL}/content-generations/${generationId}`, {
           method: "PUT",
@@ -187,7 +190,6 @@ export default function NewContextContents() {
       setVidGenErr(null);
       setVidGenLoading(true);
 
-      // If you want to force a script, include it in body; otherwise backend will read gen->video_script
       const resp = await fetch(
         `${API_BASE_URL}/customers/${customerId}/contents/${generationId}/make-video`,
         {
@@ -217,13 +219,11 @@ export default function NewContextContents() {
       const jobId = (data as any)?.job_id ?? null;
       const status = (data as any)?.status ?? null;
 
-      // Update UI
       if (typeof videoUrl === "string" && videoUrl) {
         setVidSrcUrl(videoUrl);
         setOut((prev) => ({ ...prev }));
       }
 
-      // Persist job + status (+ url if present)
       const payload: Record<string, any> = {};
       if (jobId) payload.blotato_video_id = jobId;
       if (status) payload.blotato_video_status = status;
@@ -243,7 +243,7 @@ export default function NewContextContents() {
     }
   }
 
-  /** ========= Start pipeline: then image → video ========= */
+  /** ========= Start pipeline: content (launch) OR url (blog/youtube) ========= */
   async function handleStartFromContext() {
     setErr(null);
     setOut({});
@@ -253,55 +253,102 @@ export default function NewContextContents() {
 
     const startedAt = Date.now();
     try {
-      const url = sourceUrl.trim();
-      if (!url) throw new Error("Please enter a valid URL.");
+      const customer_id = getCustomerIdFromAuth();
 
-      const body = {
-        customer_id: getCustomerIdFromAuth(),
-        url,
-        reset: true,
-        prompt_for: CONTEXT, // 👈 required by backend to pick correct prompts
-      };
+      if (USES_CONTENT) {
+        // LAUNCH: only launch_content (no topic/keywords)
+        const text = contentText.trim();
+        if (!text) throw new Error("Please paste launch content in the textarea.");
 
-      const res = await fetch(`${API_BASE_URL}/generate-contents`, {
-        method: "POST",
-        headers: { ...baseJsonHeaders, ...authHeader() },
-        body: JSON.stringify(body),
-      });
+        const body = {
+          customer_id,
+          prompt_for: CONTEXT, // "launch"
+          launch_content: text,
+          reset: true,
+        };
 
-      if (!res.ok) {
-        let msg = "Failed to start generation.";
-        try {
-          const j = await res.json();
-          msg = (j as any)?.message || msg;
-        } catch {
-          msg = (await res.text()) || msg;
+        const res = await fetch(`${API_BASE_URL}/generate-contents/launchtoContent`, {
+          method: "POST",
+          headers: { ...baseJsonHeaders, ...authHeader() },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          let msg = "Failed to start generation.";
+          try {
+            const j = await res.json();
+            msg = (j as any)?.message || msg;
+          } catch {
+            msg = (await res.text()) || msg;
+          }
+          throw new Error(msg);
         }
-        throw new Error(msg);
-      }
 
-      const json = (await res.json()) as StartResponse; // { id, message, outputs }
-      setOut(json.outputs || {});
+        const json = (await res.json()) as StartResponse;
+        setOut(json.outputs || {});
 
-      // capture id
-      let newId: number | null = null;
-      if (json.id !== undefined && json.id !== null) {
-        const n = Number(json.id);
-        newId = Number.isNaN(n) ? null : n;
-        setGenId(newId);
-      }
+        let newId: number | null = null;
+        if (json.id !== undefined && json.id !== null) {
+          const n = Number(json.id);
+          newId = Number.isNaN(n) ? null : n;
+          setGenId(newId);
+        }
 
-      // grab the script returned by start (to eliminate timing issues)
-      const scriptFromStart = (json.outputs?.video_script ?? "").trim();
+        const scriptFromStart = (json.outputs?.video_script ?? "").trim();
 
-      // === 1) Generate Image
-      if (newId) {
-        await generateImageForId(body.customer_id, newId);
-      }
+        if (newId) {
+          await generateImageForId(customer_id, newId);
+        }
+        if (newId && scriptFromStart.length > 0) {
+          await generateVideoForId(customer_id, newId, scriptFromStart);
+        }
+      } else {
+        // BLOG/YOUTUBE: URL flow preserved
+        const url = sourceUrl.trim();
+        if (!url) throw new Error("Please enter a valid URL.");
 
-      // === 2) Immediately Generate Video (only if we have an id and a script)
-      if (newId && scriptFromStart.length > 0) {
-        await generateVideoForId(body.customer_id, newId, scriptFromStart);
+        const body = {
+          customer_id,
+          url,
+          reset: true,
+          prompt_for: CONTEXT,
+        };
+
+        const res = await fetch(`${API_BASE_URL}/generate-contents`, {
+          method: "POST",
+          headers: { ...baseJsonHeaders, ...authHeader() },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          let msg = "Failed to start generation.";
+          try {
+            const j = await res.json();
+            msg = (j as any)?.message || msg;
+          } catch {
+            msg = (await res.text()) || msg;
+          }
+          throw new Error(msg);
+        }
+
+        const json = (await res.json()) as StartResponse;
+        setOut(json.outputs || {});
+
+        let newId: number | null = null;
+        if (json.id !== undefined && json.id !== null) {
+          const n = Number(json.id);
+          newId = Number.isNaN(n) ? null : n;
+          setGenId(newId);
+        }
+
+        const scriptFromStart = (json.outputs?.video_script ?? "").trim();
+
+        if (newId) {
+          await generateImageForId(customer_id, newId);
+        }
+        if (newId && scriptFromStart.length > 0) {
+          await generateVideoForId(customer_id, newId, scriptFromStart);
+        }
       }
     } catch (e: any) {
       setErr(e?.message || "Something went wrong.");
@@ -314,11 +361,9 @@ export default function NewContextContents() {
 
   const handleGoNext = () => {
     if (!genId) return;
-    // dynamic route based on context, e.g. /customer/blog/view/:id
     navigate(`/customer/${CONTEXT}/view/${genId}`);
   };
 
-  // Shared readiness gate for "Click Here" and "Next"
   const canProceed = !!genId && !loading && !imgGenLoading && !vidGenLoading;
 
   const titleNoun = titleCase(CONTEXT);
@@ -327,7 +372,7 @@ export default function NewContextContents() {
       ? "Put Blog URL Here"
       : CONTEXT === "youtube"
       ? "Put YouTube URL Here"
-      : "Put Source URL Here";
+      : "Paste your launch content here…";
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-10 px-4">
@@ -346,49 +391,97 @@ export default function NewContextContents() {
         )}
 
         <div className={`space-y-6 ${isBusy ? "opacity-60" : ""}`} aria-busy={isBusy}>
-          {/* ROW 1 */}
-          <div className="grid md:grid-cols-3 gap-4 items-stretch">
-            <input
-              type="text"
-              placeholder={inputPlaceholder}
-              value={sourceUrl}
-              onChange={(e) => setSourceUrl(e.target.value)}
-              className="md:col-span-2 h-12 border border-gray-300 rounded-md px-4 outline-none focus:ring-2 focus:ring-teal-400"
-            />
-            <button
-              onClick={handleStartFromContext}
-              disabled={loading}
-              className="h-12 bg-teal-500 text-white rounded-md hover:bg-teal-600 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <>
-                  <svg
-                    className="animate-spin h-4 w-4"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    ></circle>
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                    ></path>
-                  </svg>
-                  <span>Generating… {formatDuration(elapsedMs)}</span>
-                </>
-              ) : (
-                "Start"
-              )}
-            </button>
-          </div>
+          {/* ======= INPUT AREA ======= */}
+          {USES_CONTENT ? (
+            <div className="grid gap-4">
+              <textarea
+                placeholder={inputPlaceholder}
+                value={contentText}
+                onChange={(e) => setContentText(e.target.value)}
+                rows={2}
+                className="w-full border border-gray-300 rounded-md p-4 outline-none focus:ring-2 focus:ring-teal-400"
+              />
+              <div className="flex">
+                <button
+                  onClick={handleStartFromContext}
+                  disabled={loading}
+                  className="ml-auto h-12 bg-teal-500 text-white rounded-md px-6 hover:bg-teal-600 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {loading ? (
+                    <>
+                      <svg
+                        className="animate-spin h-4 w-4"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                        ></path>
+                      </svg>
+                      <span>Generating… {formatDuration(elapsedMs)}</span>
+                    </>
+                  ) : (
+                    "Start"
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : (
+            // URL flow UI for blog/youtube (kept)
+            <div className="grid md:grid-cols-3 gap-4 items-stretch">
+              <input
+                type="text"
+                placeholder={inputPlaceholder}
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+                className="md:col-span-2 h-12 border border-gray-300 rounded-md px-4 outline-none focus:ring-2 focus:ring-teal-400"
+              />
+              <button
+                onClick={handleStartFromContext}
+                disabled={loading}
+                className="h-12 bg-teal-500 text-white rounded-md hover:bg-teal-600 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <svg
+                      className="animate-spin h-4 w-4"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                      ></path>
+                    </svg>
+                    <span>Generating… {formatDuration(elapsedMs)}</span>
+                  </>
+                ) : (
+                  "Start"
+                )}
+              </button>
+            </div>
+          )}
 
           {/* chips */}
           <div className="flex flex-wrap items-center gap-3 text-sm">

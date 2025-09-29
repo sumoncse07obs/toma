@@ -1,4 +1,4 @@
-// src/components/customer/ListBlogContents.tsx
+// src/components/customer/ListLaunchContents.tsx
 import React from "react";
 import { currentUser, isAuthed, refreshUser, type User } from "@/components/auth";
 import { Link } from "react-router-dom";
@@ -6,8 +6,8 @@ import { Link } from "react-router-dom";
 type ContentGeneration = {
   id: number;
   customer_id: number;
-  prompt_for?: string | null; // 👈 (optional) shown if your API returns it
-  url: string;
+  prompt_for?: string | null; // optional
+  url?: string | null;        // 🔸 now optional and unused in UI
   title: string | null;
   status: "idle" | "queued" | "processing" | "completed" | "failed";
   last_run_at: string | null;
@@ -21,7 +21,7 @@ type Props = {
 };
 
 /* ========= CONFIG: set once here ========= */
-const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "blog";
+const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "launch";
 
 /* ========= API base =========*/
 const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`;
@@ -70,7 +70,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
+export default function ListLaunchContents({ customerId, perPage = 10 }: Props) {
   const [user, setUser] = React.useState<User | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -78,7 +78,7 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
   // Prefer customer_id (not user.id)
   const validCustomerId =
     customerId ??
-    user?.customer_id ??
+    (user as any)?.customer_id ??
     (user as any)?.customer?.id ??
     (user as any)?.profile?.customer_id ??
     1;
@@ -125,9 +125,7 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
           setRows(res.items);
           setTotal(res.total ?? res.items.length ?? 0);
         } else {
-          setError(
-            `Unexpected API response format. Keys: ${Object.keys(res).join(", ")}`
-          );
+          setError(`Unexpected API response format. Keys: ${Object.keys(res).join(", ")}`);
           setRows([]);
           setTotal(0);
         }
@@ -154,10 +152,10 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
   return (
     <div className="p-4 md:p-6">
       <div className="mb-4 flex items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold">Blogs Automation</h1>
+        <h1 className="text-xl font-semibold">Launch Automation</h1>
         <div className="flex gap-2">
           <Link
-            to="/customer/blog/new"
+            to="/customer/launch/new"
             className="rounded-lg bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700 transition-colors"
           >
             New Automation
@@ -187,7 +185,7 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
             setPage(1);
             setQ(e.target.value);
           }}
-          placeholder="Search URL or title…"
+          placeholder="Search title…"
           className="w-full md:w-80 rounded-lg border px-3 py-2 outline-none focus:ring"
         />
         <div className="text-sm text-gray-500">
@@ -196,10 +194,10 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
       </div>
 
       <div className="overflow-x-auto rounded-xl border">
-        <table className="min-w-[800px] w-full text-left">
+        <table className="min-w-[640px] w-full text-left">
           <thead className="bg-gray-50 text-sm">
             <tr>
-              <th className="px-3 py-2 font-medium">URL</th>
+              {/* URL column removed */}
               <th className="px-3 py-2 font-medium">Title</th>
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Last Run</th>
@@ -209,23 +207,14 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
           <tbody className="text-sm">
             {rows.map((r) => (
               <tr key={r.id} className="border-t">
+                {/* Title */}
                 <td className="px-3 py-2">
-                  <a
-                    href={r.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-600 hover:underline break-all"
-                  >
-                    {r.url}
-                  </a>
-                </td>
-
-                <td className="px-3 py-2">
-                  <span className="block max-w-[28rem] truncate" title={r.title || ""}>
+                  <span className="block max-w-[32rem] truncate" title={r.title || ""}>
                     {r.title || <span className="text-gray-400 italic">—</span>}
                   </span>
                 </td>
 
+                {/* Status */}
                 <td className="px-3 py-2">
                   <span
                     className={cls(
@@ -241,8 +230,10 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
                   </span>
                 </td>
 
+                {/* Last run */}
                 <td className="px-3 py-2">{fmt(r.last_run_at)}</td>
 
+                {/* Actions */}
                 <td className="px-3 py-2">
                   <div className="flex items-center justify-end gap-2">
                     <Link
@@ -258,7 +249,8 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
 
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-3 py-8 text-center text-gray-500">
+                {/* colSpan reduced by one since URL column is gone */}
+                <td colSpan={4} className="px-3 py-8 text-center text-gray-500">
                   No records yet.
                 </td>
               </tr>
@@ -269,7 +261,7 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
 
       {/* Pagination */}
       <div className="mt-4 flex items-center justify-between">
-        <div className="text-sm text-gray-500">Page {page} of {Math.max(1, Math.ceil(total / perPage))}</div>
+        <div className="text-sm text-gray-500">Page {page} of {totalPages}</div>
         <div className="flex items-center gap-2">
           <button
             disabled={page <= 1 || loading}
@@ -279,14 +271,20 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
             Prev
           </button>
           <button
-            disabled={page >= Math.max(1, Math.ceil(total / perPage)) || loading}
-            onClick={() => setPage((p) => Math.min(Math.max(1, Math.ceil(total / perPage)), p + 1))}
+            disabled={page >= totalPages || loading}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             className="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-gray-50"
           >
             Next
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <strong>Error:</strong> {error}
+        </div>
+      )}
     </div>
   );
 }

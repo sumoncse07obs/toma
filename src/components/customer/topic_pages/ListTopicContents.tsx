@@ -1,4 +1,4 @@
-// src/components/customer/ListBlogContents.tsx
+// src/components/customer/ListTopicContents.tsx
 import React from "react";
 import { currentUser, isAuthed, refreshUser, type User } from "@/components/auth";
 import { Link } from "react-router-dom";
@@ -21,7 +21,7 @@ type Props = {
 };
 
 /* ========= CONFIG: set once here ========= */
-const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "blog";
+const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "topic";
 
 /* ========= API base =========*/
 const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`;
@@ -70,7 +70,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
+export default function ListTopicContents({ customerId, perPage = 10 }: Props) {
   const [user, setUser] = React.useState<User | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -154,10 +154,10 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
   return (
     <div className="p-4 md:p-6">
       <div className="mb-4 flex items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold">Blogs Automation</h1>
+        <h1 className="text-xl font-semibold">Topic Automation</h1>
         <div className="flex gap-2">
           <Link
-            to="/customer/blog/new"
+            to="/customer/topic/new"
             className="rounded-lg bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700 transition-colors"
           >
             New Automation
@@ -199,7 +199,6 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
         <table className="min-w-[800px] w-full text-left">
           <thead className="bg-gray-50 text-sm">
             <tr>
-              <th className="px-3 py-2 font-medium">URL</th>
               <th className="px-3 py-2 font-medium">Title</th>
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Last Run</th>
@@ -209,17 +208,6 @@ export default function ListBlogContents({ customerId, perPage = 10 }: Props) {
           <tbody className="text-sm">
             {rows.map((r) => (
               <tr key={r.id} className="border-t">
-                <td className="px-3 py-2">
-                  <a
-                    href={r.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-600 hover:underline break-all"
-                  >
-                    {r.url}
-                  </a>
-                </td>
-
                 <td className="px-3 py-2">
                   <span className="block max-w-[28rem] truncate" title={r.title || ""}>
                     {r.title || <span className="text-gray-400 italic">—</span>}
