@@ -18,27 +18,29 @@ import {
   isRegularUser,
   getDashboardRoute,
   TOKEN_KEY,
+  apiCall, // ⬅️ use the shared API helper
 } from "@/auth";
 
-// Utility to fetch is_active directly here (authoritative every time)
+// Use the same base + token + error handling as the rest of the app
 async function fetchCustomerActive(): Promise<boolean> {
-  try {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const res = await fetch("/api/customers/me", {
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-    if (!res.ok) return false; // treat errors as inactive lockout
-    const data = await res.json();
-    const obj = data?.data ?? data ?? {};
-    const raw = obj?.is_active ?? obj?.active ?? null;
-    return raw === true || raw === 1 || raw === "1";
-  } catch {
-    return false; // safe default
-  }
+  const res = await apiCall("/customers/me");
+  // Accept common shapes from Laravel controllers/resources:
+  //  a) { data: { is_active: 1 } }
+  //  b) { data: { customer: { is_active: 1 } } }
+  //  c) { is_active: 1 }
+  //  d) { data: { active: true } }
+  const root = (res?.data ?? res) ?? {};
+  const customer = root?.customer ?? root;
+  const raw =
+    customer?.is_active ??
+    customer?.active ??
+    (typeof customer?.status === "string"
+      ? customer.status.toLowerCase() === "active"
+        ? 1
+        : 0
+      : null);
+
+  return raw === true || raw === 1 || raw === "1";
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -57,9 +59,12 @@ function UserRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/** 
- * CustomerRoute: hard-enforces is_active on every entry.
- * If inactive => redirect to /payment (no access to /customer/*).
+/**
+ * CustomerRoute:
+ *  - Verifies token + role
+ *  - Calls /customers/me via apiCall()
+ *  - Only redirects to /payment when we are SURE the account is inactive
+ *  - Shows a clear error UI on transient server/network errors (no false "inactive")
  */
 function CustomerRoute({ children }: { children: React.ReactNode }) {
   if (!isAuthed()) return <Navigate to="/" replace />;
@@ -67,22 +72,48 @@ function CustomerRoute({ children }: { children: React.ReactNode }) {
 
   const [loading, setLoading] = React.useState(true);
   const [active, setActive] = React.useState<boolean | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let mounted = true;
     (async () => {
-      const ok = await fetchCustomerActive();
-      if (!mounted) return;
-      setActive(ok);
-      setLoading(false);
+      try {
+        const ok = await fetchCustomerActive();
+        if (!mounted) return;
+        setActive(ok);
+      } catch (err: any) {
+        if (!mounted) return;
+        setError(err?.message || "Could not verify account status.");
+      } finally {
+        if (mounted) setLoading(false);
+      }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   if (loading) {
     return (
       <div className="min-h-screen grid place-items-center text-slate-600">
         Checking account status…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen grid place-items-center p-6">
+        <div className="max-w-md w-full bg-white border border-slate-200 rounded-xl p-5 text-center shadow-sm">
+          <p className="text-slate-900 font-semibold">We couldn’t verify your account status.</p>
+          <p className="text-slate-600 mt-1 text-sm">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 rounded-lg bg-slate-900 text-white px-4 py-2 font-medium"
+          >
+            Try again
+          </button>
+        </div>
       </div>
     );
   }
@@ -123,10 +154,10 @@ export default function App() {
           }
         />
 
-        {/* Payment: must be directly reachable by inactive customers */}
+        {/* Payment: reachable by inactive customers */}
         <Route path="/payment" element={<Payment />} />
 
-        {/* User area */}
+        {/* Regular user area */}
         <Route
           path="/dashboard/*"
           element={
