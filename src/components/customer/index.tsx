@@ -24,15 +24,15 @@ import NewLaunchContents from "@/components/customer/launch_pages/NewLaunchConte
 import LaunchPost from "@/components/customer/launch_pages/LaunchPost";
 import ViewLaunchContents from "@/components/customer/launch_pages/ViewLaunchContents";
 
-import Settings from "@/components/customer/SettingsPage";
+import Settings from "@/components/customer/settings/SettingsPage";
 
 import PostToBlotato from "@/components/customer/PostToBlotato";
 import Portfolio from "@/components/customer/Portfolio";
 
-import BlogPromptSettings from "@/components/customer/BlogPromptSettings";
-import YoutubePromptSettings from "@/components/customer/YoutubePromptSettings";
-import TopicPromptSettings from "@/components/customer/TopicPromptSettings";
-import LaunchPromptSettings from "@/components/customer/LaunchPromptSettings";
+import BlogPromptSettings from "@/components/customer/settings/BlogPromptSettings";
+import YoutubePromptSettings from "@/components/customer/settings/YoutubePromptSettings";
+import TopicPromptSettings from "@/components/customer/settings/TopicPromptSettings";
+import LaunchPromptSettings from "@/components/customer/settings/LaunchPromptSettings";
 
 import SupportHome from "@/components/support/SupportHome";
 import NewSupportTicket from "@/components/support/NewSupportTicket";

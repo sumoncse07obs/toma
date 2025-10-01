@@ -20,7 +20,6 @@ type Props = {
   perPage?: number;
 };
 
-/* ========= CONFIG ========= */
 const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "youtube";
 const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`;
 const TOKEN_KEY = "toma_token";
@@ -91,11 +90,36 @@ async function getCustomerIdFromMe(): Promise<number | undefined> {
   }
 }
 
+// simple skeleton row
+function RowSkeleton() {
+  return (
+    <tr className="border-t animate-pulse">
+      <td className="px-3 py-3">
+        <div className="h-3 w-64 bg-gray-200 rounded" />
+      </td>
+      <td className="px-3 py-3">
+        <div className="h-3 w-72 bg-gray-200 rounded" />
+      </td>
+      <td className="px-3 py-3">
+        <div className="h-5 w-20 bg-gray-200 rounded-full" />
+      </td>
+      <td className="px-3 py-3">
+        <div className="h-3 w-28 bg-gray-200 rounded" />
+      </td>
+      <td className="px-3 py-3">
+        <div className="h-8 w-16 bg-gray-200 rounded ml-auto" />
+      </td>
+    </tr>
+  );
+}
+
 export default function ListYoutubeContents({ customerId, perPage = 10 }: Props) {
   const [user, setUser] = React.useState<User | null>(null);
   const [customerIdFromAPI, setCustomerIdFromAPI] = React.useState<number | undefined>(undefined);
 
   const [loading, setLoading] = React.useState(false);
+  const [resolvingCustomer, setResolvingCustomer] = React.useState(true);
+  const [graceExpired, setGraceExpired] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   // compute final id
@@ -115,6 +139,7 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
   const [rows, setRows] = React.useState<ContentGeneration[]>([]);
   const [total, setTotal] = React.useState(0);
 
+  // bootstrap user
   React.useEffect(() => {
     const cu = currentUser();
     if (cu) {
@@ -124,21 +149,61 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
     }
   }, []);
 
-  // fetch /customers/me if we don’t already have one
+  // grace timer
   React.useEffect(() => {
-    (async () => {
-      if (!isAuthed()) return;
+    const t = setTimeout(() => setGraceExpired(true), 1200);
+    return () => clearTimeout(t);
+  }, []);
+
+  // fetch /customers/me with retries if we don’t already have one
+  React.useEffect(() => {
+    if (!isAuthed()) {
+      setResolvingCustomer(false);
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 3;
+    const intervalMs = 600;
+
+    async function tryResolve() {
+      attempts++;
+
       const already = toNumberId(
         customerId ??
           (user as any)?.customer_id ??
           (user as any)?.customer?.id ??
           (user as any)?.profile?.customer_id
       );
-      if (!already) {
-        const id = await getCustomerIdFromMe();
-        setCustomerIdFromAPI(id);
+      if (already) {
+        if (!cancelled) {
+          setCustomerIdFromAPI(already);
+          setResolvingCustomer(false);
+        }
+        return;
       }
-    })();
+
+      const id = await getCustomerIdFromMe();
+      if (!cancelled) {
+        if (id) {
+          setCustomerIdFromAPI(id);
+          setResolvingCustomer(false);
+        } else if (attempts < maxAttempts) {
+          setTimeout(tryResolve, intervalMs);
+        } else {
+          setResolvingCustomer(false);
+        }
+      }
+    }
+
+    setResolvingCustomer(true);
+    tryResolve();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId, user]);
 
   const load = React.useCallback(async () => {
@@ -147,6 +212,11 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
       setError(null);
 
       if (!validCustomerId) {
+        if (resolvingCustomer || !graceExpired) {
+          setRows([]);
+          setTotal(0);
+          return;
+        }
         setRows([]);
         setTotal(0);
         setError("No customer selected/available. Please make sure your account has a customer profile.");
@@ -192,13 +262,19 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
     } finally {
       setLoading(false);
     }
-  }, [validCustomerId, page, perPage, q]);
+  }, [validCustomerId, page, perPage, q, resolvingCustomer, graceExpired]);
 
   React.useEffect(() => {
     if (user || !isAuthed()) load();
   }, [load, user]);
 
   const totalPages = Math.max(1, Math.ceil(total / perPage));
+
+  const showNoCustomerBanner =
+    isAuthed() && !validCustomerId && !resolvingCustomer && graceExpired;
+
+  const showSkeleton =
+    loading || resolvingCustomer || (!validCustomerId && !graceExpired);
 
   return (
     <div className="p-4 md:p-6">
@@ -214,9 +290,9 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
           <button
             onClick={() => load()}
             className="rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-50"
-            disabled={loading}
+            disabled={loading || resolvingCustomer}
           >
-            {loading ? "Loading..." : "Refresh"}
+            {loading || resolvingCustomer ? "Loading..." : "Refresh"}
           </button>
         </div>
       </div>
@@ -229,10 +305,10 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
         </div>
       )}
 
-      {isAuthed() && !validCustomerId && (
+      {showNoCustomerBanner && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
           <p className="text-sm text-red-700">
-            We couldn’t determine your customer ID. Ensure your user profile is linked to a customer, or pass <code>customerId</code> as a prop.
+            No customer selected/available. Please make sure your account has a customer profile.
           </p>
         </div>
       )}
@@ -246,9 +322,10 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
           }}
           placeholder="Search URL or title…"
           className="w-full md:w-80 rounded-lg border px-3 py-2 outline-none focus:ring"
+          disabled={resolvingCustomer}
         />
         <div className="text-sm text-gray-500">
-          {loading ? "Loading…" : `${total} result${total === 1 ? "" : "s"}`}
+          {showSkeleton ? "Loading…" : `${total} result${total === 1 ? "" : "s"}`}
         </div>
       </div>
 
@@ -264,59 +341,69 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
             </tr>
           </thead>
           <tbody className="text-sm">
-            {rows.map((r) => (
-              <tr key={r.id} className="border-t">
-                <td className="px-3 py-2">
-                  <a
-                    href={r.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-600 hover:underline break-all"
-                  >
-                    {r.url}
-                  </a>
-                </td>
+            {showSkeleton
+              ? Array.from({ length: 6 }).map((_, i) => <RowSkeleton key={i} />)
+              : rows.map((r) => (
+                  <tr key={r.id} className="border-t">
+                    <td className="px-3 py-2">
+                      <a
+                        href={r.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 hover:underline break-all"
+                      >
+                        {r.url}
+                      </a>
+                    </td>
 
-                <td className="px-3 py-2">
-                  <span className="block max-w-[28rem] truncate" title={r.title || ""}>
-                    {r.title || <span className="text-gray-400 italic">—</span>}
-                  </span>
-                </td>
+                    <td className="px-3 py-2">
+                      <span className="block max-w-[28rem] truncate" title={r.title || ""}>
+                        {r.title || <span className="text-gray-400 italic">—</span>}
+                      </span>
+                    </td>
 
-                <td className="px-3 py-2">
-                  <span
-                    className={cls(
-                      "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                      r.status === "completed" && "bg-green-100 text-green-700",
-                      r.status === "processing" && "bg-amber-100 text-amber-700",
-                      r.status === "queued" && "bg-blue-100 text-blue-700",
-                      r.status === "failed" && "bg-red-100 text-red-700",
-                      r.status === "idle" && "bg-gray-100 text-gray-600"
-                    )}
-                  >
-                    {r.status}
-                  </span>
-                </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={cls(
+                          "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                          r.status === "completed" && "bg-green-100 text-green-700",
+                          r.status === "processing" && "bg-amber-100 text-amber-700",
+                          r.status === "queued" && "bg-blue-100 text-blue-700",
+                          r.status === "failed" && "bg-red-100 text-red-700",
+                          r.status === "idle" && "bg-gray-100 text-gray-600"
+                        )}
+                      >
+                        {r.status}
+                      </span>
+                    </td>
 
-                <td className="px-3 py-2">{fmt(r.last_run_at)}</td>
+                    <td className="px-3 py-2">{fmt(r.last_run_at)}</td>
 
-                <td className="px-3 py-2">
-                  <div className="flex items-center justify-end gap-2">
-                    <Link
-                      to={`/customer/${CONTEXT}/view/${r.id}`}
-                      className="rounded-md border px-2 py-1 hover:bg-gray-50 transition-colors text-blue-600 hover:text-blue-700"
-                    >
-                      View
-                    </Link>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-end gap-2">
+                        <Link
+                          to={`/customer/${CONTEXT}/view/${r.id}`}
+                          className="rounded-md border px-2 py-1 hover:bg-gray-50 transition-colors text-blue-600 hover:text-blue-700"
+                        >
+                          View
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
 
-            {!loading && rows.length === 0 && (
+            {!showSkeleton && rows.length === 0 && !error && (
               <tr>
                 <td colSpan={5} className="px-3 py-8 text-center text-gray-500">
                   No records yet.
+                </td>
+              </tr>
+            )}
+
+            {!showSkeleton && error && !rows.length && (
+              <tr>
+                <td colSpan={5} className="px-3 py-8 text-center text-red-600">
+                  {error}
                 </td>
               </tr>
             )}
@@ -328,14 +415,14 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
         <div className="text-sm text-gray-500">Page {page} of {totalPages}</div>
         <div className="flex items-center gap-2">
           <button
-            disabled={page <= 1 || loading}
+            disabled={page <= 1 || loading || resolvingCustomer}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             className="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-gray-50"
           >
             Prev
           </button>
           <button
-            disabled={page >= totalPages || loading}
+            disabled={page >= totalPages || loading || resolvingCustomer}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             className="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-gray-50"
           >
@@ -343,12 +430,6 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
           </button>
         </div>
       </div>
-
-      {error && (
-        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          <strong>Error:</strong> {error}
-        </div>
-      )}
     </div>
   );
 }
