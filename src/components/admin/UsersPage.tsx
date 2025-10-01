@@ -1,22 +1,4 @@
 import React from "react";
-
-/**
- * UsersPage
- * --------------------------------------------------
- * Admin page for managing users against your Laravel 9 API.
- * Endpoints:
- *  GET    /api/users?search=&role=&sort_by=&sort_order=&page=&per_page=
- *  GET    /api/users/:id
- *  POST   /api/users                      { name, email, password, role }
- *  PUT    /api/users/:id                  { name?, email?, role? }
- *  DELETE /api/users/:id
- *  POST   /api/users/:id/reset-password   { password }
- *  GET    /api/user-statistics
- */
-
-// ----------------------------
-// Config
-// ----------------------------
 const API_BASE = `${import.meta.env.VITE_API_BASE}/api`;
 const TOKEN_KEY = "toma_token";
 const API = (path: string) =>

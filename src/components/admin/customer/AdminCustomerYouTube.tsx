@@ -1,13 +1,15 @@
-// src/components/YoutubePromptSettings.tsx
+// src/components/admin/customer/AdminCustomerYouTube.tsx
+// src/components/AdminCustomerYouTube.tsx
 import React from "react";
-import { currentUser, refreshUser } from "@/auth";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { toast } from "react-toastify";
+
 type PromptFor = "youtube";
 
 export type PromptSetting = {
   id: number;
   customer_id: number;
-  prompt_for: PromptFor; // 👈 required now
+  prompt_for: PromptFor;
 
   summary_prompt?: string | null;
   short_summary_prompt?: string | null;
@@ -63,14 +65,10 @@ export type PromptSetting = {
 
 const API_BASE = `${import.meta.env.VITE_API_BASE}/api`;
 const TOKEN_KEY = "toma_token";
-const CACHED_CUSTOMER_ID_KEY = "toma_customer_id";
-const PROMPT_FOR: PromptFor = "youtube"; // 👈 hard-locked per your ask
+const PROMPT_FOR: PromptFor = "youtube";
 
 function norm(path: string) {
-  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`.replace(
-    /([^:]\/)\/+/g,
-    "$1"
-  );
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`.replace(/([^:]\/)\/+/g, "$1");
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -94,9 +92,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`HTTP ${res.status}: ${msg}`);
   }
   const ct = res.headers.get("content-type") || "";
-  return (ct.includes("application/json")
-    ? await res.json()
-    : (undefined as any)) as T;
+  return (ct.includes("application/json") ? await res.json() : (undefined as any)) as T;
 }
 
 const unwrap = <T,>(res: any): T => (res?.data ?? res) as T;
@@ -105,9 +101,7 @@ const PromptSettingAPI = {
   // GET /prompt-setting?customer_id=&prompt_for=
   async getByCustomerAndContext(customerId: number, promptFor: PromptFor) {
     const res = await api<any>(
-      `/prompt-setting?customer_id=${customerId}&prompt_for=${encodeURIComponent(
-        promptFor
-      )}`
+      `/prompt-setting?customer_id=${customerId}&prompt_for=${encodeURIComponent(promptFor)}`
     );
     return unwrap<PromptSetting | null>(res);
   },
@@ -121,8 +115,7 @@ const PromptSettingAPI = {
   },
   // PUT /prompt-setting/{id}
   async update(id: number, payload: Partial<PromptSetting>) {
-    const { id: _i, customer_id: _c, created_at: _ca, updated_at: _ua, ...rest } =
-      payload as any;
+    const { id: _i, customer_id: _c, created_at: _ca, updated_at: _ua, ...rest } = payload as any;
     const res = await api<any>(`/prompt-setting/${id}`, {
       method: "PUT",
       body: JSON.stringify(rest),
@@ -132,50 +125,31 @@ const PromptSettingAPI = {
 };
 
 /* =========================
-   Customer discovery (no AuthController change)
+   Route customer id (custom hook)
    ========================= */
 
-type SettingsResp = { data?: { customer_id?: number | null } | null };
+function useRouteCustomerId(): number | null {
+  const params = useParams();
+  const location = useLocation();
 
-async function discoverCustomerId(): Promise<number | null> {
-  // 0) From cached user
-  const u = currentUser();
-  const fromUser =
-    (u as any)?.customer_id ?? (u as any)?.customer?.id ?? null;
-  if (fromUser) {
-    try {
-      localStorage.setItem(CACHED_CUSTOMER_ID_KEY, String(fromUser));
-    } catch {}
-    return fromUser;
+  const candidates = [
+    params.id,
+    // @ts-ignore allow alternates
+    params.customerId,
+    // @ts-ignore
+    params.cid,
+  ].filter(Boolean) as string[];
+
+  for (const c of candidates) {
+    const n = Number(c);
+    if (!Number.isNaN(n) && n > 0) return n;
   }
 
-  // 1) Cached local storage
-  const cached = localStorage.getItem(CACHED_CUSTOMER_ID_KEY);
-  if (cached && /^\d+$/.test(cached)) {
-    return parseInt(cached, 10);
+  const m = location.pathname.match(/customer-dashboard\/(\d+)/i);
+  if (m?.[1]) {
+    const n = Number(m[1]);
+    if (!Number.isNaN(n) && n > 0) return n;
   }
-
-  // 2) Try refresh
-  try {
-    const refreshed = await refreshUser();
-    const fromRefresh =
-      (refreshed as any)?.customer_id ?? (refreshed as any)?.customer?.id ?? null;
-    if (fromRefresh) {
-      localStorage.setItem(CACHED_CUSTOMER_ID_KEY, String(fromRefresh));
-      return fromRefresh;
-    }
-  } catch {}
-
-  // 3) Fallback to /settings
-  try {
-    const res = await api<SettingsResp>("/settings");
-    const cid = res?.data?.customer_id ?? null;
-    if (cid) {
-      localStorage.setItem(CACHED_CUSTOMER_ID_KEY, String(cid));
-      return cid;
-    }
-  } catch {}
-
   return null;
 }
 
@@ -184,9 +158,7 @@ async function discoverCustomerId(): Promise<number | null> {
    ========================= */
 
 function Button(
-  props: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-    variant?: "primary" | "ghost" | "danger";
-  }
+  props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "ghost" | "danger" }
 ) {
   const { variant = "primary", className = "", ...rest } = props;
   const base =
@@ -211,9 +183,7 @@ function Textarea(
   const { label, hint, className = "", ...rest } = props;
   return (
     <label className="block">
-      {label ? (
-        <span className="mb-1 block text-sm font-medium text-slate-700">{label}</span>
-      ) : null}
+      {label ? <span className="mb-1 block text-sm font-medium text-slate-700">{label}</span> : null}
       <textarea
         className={`w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 ${className}`}
         {...rest}
@@ -266,6 +236,7 @@ const FIELD_GROUPS: { title: string; items: FieldDef[] }[] = [
       },
     ],
   },
+  // ... (unchanged groups below)
   {
     title: "TikTok",
     items: [
@@ -342,41 +313,24 @@ const FIELD_GROUPS: { title: string; items: FieldDef[] }[] = [
    Component
    ========================= */
 
-export default function YoutubePromptSettings() {
+export default function AdminCustomerYoutube() {
+  const customerId = useRouteCustomerId(); // ✅ hook instead of async function
   const [record, setRecord] = React.useState<PromptSetting | null>(null);
   const [form, setForm] = React.useState<Partial<PromptSetting>>({});
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [message, setMessage] = React.useState<string | null>(null);
-  const [customerId, setCustomerId] = React.useState<number | null>(null);
 
-  // discover customer_id once
+  // load setting for {customer_id, prompt_for: BLOG}
   React.useEffect(() => {
-    let alive = true;
-    (async () => {
-      const cid = await discoverCustomerId();
-      if (!alive) return;
-      if (!cid) {
-        setError("Could not determine your company. Please sign in again.");
-        setCustomerId(null);
-        return;
-      }
-      setCustomerId(cid);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // load setting for {customer_id, prompt_for: YouTube}
-  React.useEffect(() => {
-    if (!customerId) return;
+    if (!customerId) {
+      setError("Could not determine your company. Please sign in again.");
+      return;
+    }
     let mounted = true;
     (async () => {
       setLoading(true);
       setError(null);
-      setMessage(null);
       try {
         const data = await PromptSettingAPI.getByCustomerAndContext(customerId, PROMPT_FOR);
         if (!mounted) return;
@@ -384,23 +338,14 @@ export default function YoutubePromptSettings() {
           setRecord(data);
           setForm(data);
         } else {
-          const blank: Partial<PromptSetting> = {
-            customer_id: customerId,
-            prompt_for: PROMPT_FOR,
-            is_active: true,
-          };
           setRecord(null);
-          setForm(blank);
+          setForm({ customer_id: customerId, prompt_for: PROMPT_FOR, is_active: true });
         }
       } catch (e: any) {
         if (!mounted) return;
         setError(e?.message ?? "Failed to load prompt settings");
         setRecord(null);
-        setForm({
-          customer_id: customerId,
-          prompt_for: PROMPT_FOR,
-          is_active: true,
-        });
+        setForm({ customer_id: customerId, prompt_for: PROMPT_FOR, is_active: true });
       } finally {
         if (!mounted) return;
         setLoading(false);
@@ -422,23 +367,18 @@ export default function YoutubePromptSettings() {
     }
     setSaving(true);
     setError(null);
-    setMessage(null);
     try {
       const currentId = (record as any)?.id ?? (form as any)?.id ?? null;
       if (currentId) {
-        // PUT by id (customer_id immutable; prompt_for remains "youtube")
-        const { id: _i, customer_id: _c, created_at: _ca, updated_at: _ua, ...rest } =
-          form as any;
+        const { id: _i, customer_id: _c, created_at: _ca, updated_at: _ua, ...rest } = form as any;
         const updated = await PromptSettingAPI.update(Number(currentId), {
           ...rest,
           prompt_for: PROMPT_FOR,
         });
         setRecord(updated);
         setForm(updated);
-        //setMessage("Saved changes.");
         toast.success("Saved changes.");
       } else {
-        // POST upsert by (customer_id, prompt_for)
         const { id: _i, created_at: _ca, updated_at: _ua, ...rest } = form as any;
         const created = await PromptSettingAPI.upsert({
           ...rest,
@@ -448,11 +388,11 @@ export default function YoutubePromptSettings() {
         });
         setRecord(created);
         setForm(created);
-        //setMessage("Created prompt settings.");
         toast.success("Created prompt settings.");
       }
     } catch (e: any) {
       setError(e?.message ?? "Failed to save");
+      toast.error(e?.message ?? "Failed to save");
     } finally {
       setSaving(false);
     }
@@ -462,23 +402,20 @@ export default function YoutubePromptSettings() {
     if (record) setForm(record);
   }
 
-  // ❌ Removed Clear All
-
   return (
     <div className="min-h-screen bg-white text-slate-900">
       <div className="mx-auto max-w-6xl px-4 py-8">
         <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Prompt Settings — YouTube</h1>
+            <h1 className="text-2xl font-bold">Prompt Settings — Youtube</h1>
             <p className="text-sm text-slate-600">
-              Define prompt templates used by your automation.
+              Define youtube & social prompt templates used by your automation.
             </p>
           </div>
           <div className="flex items-end gap-2">
             <Button variant="ghost" onClick={handleResetToLoaded} disabled={!record}>
               Reset
             </Button>
-            {/* ❌ Removed "Clear All" */}
             <Button onClick={handleSave} disabled={!customerId || saving}>
               {saving ? "Saving…" : record?.id ? "Save Changes" : "Create Settings"}
             </Button>
@@ -488,11 +425,6 @@ export default function YoutubePromptSettings() {
         {error && (
           <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-700">
             {error}
-          </div>
-        )}
-        {message && (
-          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700">
-            {message}
           </div>
         )}
 
@@ -508,10 +440,7 @@ export default function YoutubePromptSettings() {
           <>
             <div className="space-y-8">
               {FIELD_GROUPS.map((group) => (
-                <section
-                  key={group.title}
-                  className="rounded-2xl border border-slate-200 p-5 shadow-sm"
-                >
+                <section key={group.title} className="rounded-2xl border border-slate-200 p-5 shadow-sm">
                   <header className="mb-4">
                     <h2 className="text-lg font-semibold">{group.title}</h2>
                   </header>
@@ -532,7 +461,6 @@ export default function YoutubePromptSettings() {
               ))}
             </div>
 
-            {/* ✅ Bottom Save Button */}
             <div className="mt-8 flex justify-end">
               <Button onClick={handleSave} disabled={!customerId || saving}>
                 {saving ? "Saving…" : record?.id ? "Save Changes" : "Create Settings"}

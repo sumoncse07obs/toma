@@ -1,7 +1,7 @@
-// src/components/user/YoutubePost.tsx
+// src/components/customer/youtube_page/YoutubePost.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { currentUser } from "@/components/auth";
+import { currentUser } from "@/auth";
 
 type PostType = "text" | "image" | "video";
 type PreviewSize = "sm" | "md" | "lg";

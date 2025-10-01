@@ -1,6 +1,7 @@
+// src/components/customer/blog_pages/NewBlogContents.tsx
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { currentUser } from "@/components/auth";
+import { currentUser } from "@/auth";
 
 /* ========= CONFIG: change this once per page copy ========= */
 const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "blog";

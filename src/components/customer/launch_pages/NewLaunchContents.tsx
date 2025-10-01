@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { currentUser } from "@/components/auth";
+import { currentUser } from "@/auth";
 
 /* ========= CONFIG: set this per page copy ========= */
 const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "launch";

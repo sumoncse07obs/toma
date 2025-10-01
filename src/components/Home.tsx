@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { login, logout, currentUser, USER_KEY, TOKEN_KEY } from "@/components/auth";
+import { login, logout, currentUser, USER_KEY, TOKEN_KEY } from "@/auth";
 
 export default function Home() {
   const nav = useNavigate();

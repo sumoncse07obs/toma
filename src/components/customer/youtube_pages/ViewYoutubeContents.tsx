@@ -1,8 +1,8 @@
-// src/components/customer/ViewYoutubeContents.tsx
+// src/components/customer/youtube_page/ViewYoutubeContents.tsx
 import React, { useEffect } from "react";
 import { toast } from "react-toastify";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { currentUser, isAuthed, refreshUser, type User } from "@/components/auth";
+import { currentUser, isAuthed, refreshUser, type User } from "@/auth";
 
 type ContentGeneration = {
   id: number;

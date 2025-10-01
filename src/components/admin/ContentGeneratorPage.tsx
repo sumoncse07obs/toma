@@ -1,18 +1,5 @@
 // src/components/admin/ContentGeneratorPage.tsx
 import React from "react";
-
-/**
- * Content Generator Page (+ History)
- * - Select a company
- * - Paste a blog/article URL
- * - Generate contents
- * - See history for that company; click Load to view full record (meta + outputs + all DB fields)
- */
-
-/* =========================
-   Types
-   ========================= */
-
 export type Customer = {
   id: number;
   customer_number: string;

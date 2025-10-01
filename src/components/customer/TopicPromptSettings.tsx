@@ -1,6 +1,6 @@
 // src/components/TopicPromptSettings.tsx
 import React from "react";
-import { currentUser, refreshUser } from "@/components/auth";
+import { currentUser, refreshUser } from "@/auth";
 import { toast } from "react-toastify";
 type PromptFor = "topic";
 

@@ -1,6 +1,7 @@
+// src/components/admin/layout/Sidebar.tsx
 import React from "react";
-import { NavLink, useNavigate, useLocation } from "react-router-dom";
-import { logout, currentUser } from "@/components/auth";
+import { NavLink, useNavigate, useLocation,Link } from "react-router-dom";
+import { logout, currentUser } from "@/auth";
 
 type Props = {
   open: boolean;
@@ -11,8 +12,7 @@ type Props = {
 
 const navItems = [
   { to: "/admin/customers",             label: "Customers",         icon: "👥" },
-  { to: "/admin/blog-prompt-setup",     label: "Blog Prompt Setup", icon: "▶️" },
-  { to: "/admin/launch",                label: "Launch Automation", icon: "🚀" },
+  { to: "/admin/support",                label: "Help", icon: "❓" },
   { to: "/admin/users",                 label: "Users",             icon: "👥" },
 ];
 
@@ -56,23 +56,28 @@ export default function Sidebar({ open, setOpen, collapsed, setCollapsed }: Prop
       >
         {/* Brand + collapse toggle */}
         <div className="h-16 flex items-center px-4 border-b justify-between">
-          <div className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 to-sky-400" />
-            {!collapsed && <span className="font-semibold">TOMA</span>}
-          </div>
-          <button
-            className="hidden lg:inline-flex rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100"
-            onClick={() => setCollapsed(!collapsed)}
-          >
-            {collapsed ? "➡️" : "⬅️"}
-          </button>
-          <button
-            className="lg:hidden rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100"
-            onClick={() => setOpen(false)}
-          >
-            ✖
-          </button>
-        </div>
+        {/* Brand clickable to /admin */}
+        <Link to="/admin" className="flex items-center gap-2">
+          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 to-sky-400" />
+          {!collapsed && <span className="font-semibold">TOMA</span>}
+        </Link>
+
+        {/* Collapse toggle */}
+        <button
+          className="hidden lg:inline-flex rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100"
+          onClick={() => setCollapsed(!collapsed)}
+        >
+          {collapsed ? "➡️" : "⬅️"}
+        </button>
+
+        {/* Mobile close */}
+        <button
+          className="lg:hidden rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100"
+          onClick={() => setOpen(false)}
+        >
+          ✖
+        </button>
+      </div>
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto p-3 space-y-1">

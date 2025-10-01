@@ -1,5 +1,6 @@
 // src/components/admin/CustomersPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 /** ===== Types ===== */
 export type Customer = {
@@ -324,6 +325,9 @@ export default function CustomersPage() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState<null | { mode: "create" } | { mode: "edit"; record: Customer }>(null);
 
+  const navigate = useNavigate();
+  const dashboardPath = (c: Customer) => `/admin/customer-dashboard/${c.id}`;
+
   const totalPages = Math.max(1, Math.ceil(total / perPage));
 
   async function load() {
@@ -443,12 +447,24 @@ export default function CustomersPage() {
                       : (c.is_active as boolean) ?? c.active ?? true;
 
                   return (
-                    <tr key={c.id} className="hover:bg-slate-50/60">
+                    <tr
+                      key={c.id}
+                      className="hover:bg-slate-50/60"
+                      onDoubleClick={() => navigate(dashboardPath(c))} // optional: double-click row to open dashboard
+                      title="Double-click to open dashboard"
+                      style={{ cursor: "default" }}
+                    >
                       <td className="px-4 py-3 font-mono text-sm text-slate-800">
                         {c.customer_number}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="font-medium">{c.business_name || "—"}</div>
+                        <Link
+                          to={dashboardPath(c)}
+                          className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+                          title="Open customer dashboard"
+                        >
+                          {c.business_name || "—"}
+                        </Link>
                         <div className="text-xs text-slate-500">
                           {c.city || ""}{c.city && c.state ? ", " : ""}{c.state || ""}
                         </div>
@@ -463,6 +479,15 @@ export default function CustomersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
+                          <Link
+                            to={dashboardPath(c)}
+                            target="_blank"
+                            className="inline-flex items-center justify-center rounded-xl px-3 py-2 text-sm font-medium border border-slate-300 hover:bg-slate-50"
+                            title="Open dashboard"
+                          >
+                            📊 Dashboard
+                          </Link>
+
                           <Button
                             variant="ghost"
                             onClick={() => setShowForm({ mode: "edit", record: c })}

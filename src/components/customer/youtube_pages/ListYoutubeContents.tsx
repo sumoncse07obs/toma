@@ -1,12 +1,12 @@
-// src/components/customer/ListYoutubeContents.tsx
+// src/components/customer/youtube_page/ListYoutubeContents.tsx
 import React from "react";
-import { currentUser, isAuthed, refreshUser, type User } from "@/components/auth";
+import { currentUser, isAuthed, refreshUser, type User } from "@/auth";
 import { Link } from "react-router-dom";
 
 type ContentGeneration = {
   id: number;
   customer_id: number;
-  prompt_for?: string | null; // 👈 (optional) shown if your API returns it
+  prompt_for?: string | null; // optional
   url: string;
   title: string | null;
   status: "idle" | "queued" | "processing" | "completed" | "failed";
@@ -20,10 +20,8 @@ type Props = {
   perPage?: number;
 };
 
-/* ========= CONFIG: set once here ========= */
+/* ========= CONFIG ========= */
 const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "youtube";
-
-/* ========= API base =========*/
 const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`;
 const TOKEN_KEY = "toma_token";
 
@@ -70,18 +68,47 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+function toNumberId(raw: unknown): number | undefined {
+  if (raw == null) return undefined;
+  const n =
+    typeof raw === "string"
+      ? parseInt(raw, 10)
+      : typeof raw === "number"
+      ? raw
+      : Number(raw as any);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+// helper: fetch /customers/me
+async function getCustomerIdFromMe(): Promise<number | undefined> {
+  try {
+    const res = await api<any>("/customers/me");
+    const obj = (res?.data ?? res) || {};
+    const id = obj?.id ?? obj?.customer_id;
+    return Number.isFinite(id) ? Number(id) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export default function ListYoutubeContents({ customerId, perPage = 10 }: Props) {
   const [user, setUser] = React.useState<User | null>(null);
+  const [customerIdFromAPI, setCustomerIdFromAPI] = React.useState<number | undefined>(undefined);
+
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Prefer customer_id (not user.id)
-  const validCustomerId =
-    customerId ??
-    user?.customer_id ??
-    (user as any)?.customer?.id ??
-    (user as any)?.profile?.customer_id ??
-    1;
+  // compute final id
+  const validCustomerId: number | undefined = React.useMemo(() => {
+    const candidate =
+      customerIdFromAPI ??
+      customerId ??
+      (user as any)?.customer_id ??
+      (user as any)?.customer?.id ??
+      (user as any)?.profile?.customer_id;
+
+    return toNumberId(candidate);
+  }, [customerIdFromAPI, customerId, user]);
 
   const [q, setQ] = React.useState("");
   const [page, setPage] = React.useState(1);
@@ -97,14 +124,38 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
     }
   }, []);
 
+  // fetch /customers/me if we don’t already have one
+  React.useEffect(() => {
+    (async () => {
+      if (!isAuthed()) return;
+      const already = toNumberId(
+        customerId ??
+          (user as any)?.customer_id ??
+          (user as any)?.customer?.id ??
+          (user as any)?.profile?.customer_id
+      );
+      if (!already) {
+        const id = await getCustomerIdFromMe();
+        setCustomerIdFromAPI(id);
+      }
+    })();
+  }, [customerId, user]);
+
   const load = React.useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
+      if (!validCustomerId) {
+        setRows([]);
+        setTotal(0);
+        setError("No customer selected/available. Please make sure your account has a customer profile.");
+        return;
+      }
+
       const params = {
         customer_id: validCustomerId,
-        prompt_for: CONTEXT, // 👈 filter by context at the API
+        prompt_for: CONTEXT,
         page,
         per_page: perPage,
         q,
@@ -125,9 +176,7 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
           setRows(res.items);
           setTotal(res.total ?? res.items.length ?? 0);
         } else {
-          setError(
-            `Unexpected API response format. Keys: ${Object.keys(res).join(", ")}`
-          );
+          setError(`Unexpected API response format. Keys: ${Object.keys(res).join(", ")}`);
           setRows([]);
           setTotal(0);
         }
@@ -146,7 +195,7 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
   }, [validCustomerId, page, perPage, q]);
 
   React.useEffect(() => {
-    if (user) load();
+    if (user || !isAuthed()) load();
   }, [load, user]);
 
   const totalPages = Math.max(1, Math.ceil(total / perPage));
@@ -154,7 +203,7 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
   return (
     <div className="p-4 md:p-6">
       <div className="mb-4 flex items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold">Youtube Automation</h1>
+        <h1 className="text-xl font-semibold">YouTube Automation</h1>
         <div className="flex gap-2">
           <Link
             to="/customer/youtube/new"
@@ -176,6 +225,14 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
         <div className="mb-4 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3">
           <p className="text-sm text-yellow-800">
             You need to be logged in to view content generations. Please login to your account first.
+          </p>
+        </div>
+      )}
+
+      {isAuthed() && !validCustomerId && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm text-red-700">
+            We couldn’t determine your customer ID. Ensure your user profile is linked to a customer, or pass <code>customerId</code> as a prop.
           </p>
         </div>
       )}
@@ -267,9 +324,8 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
         </table>
       </div>
 
-      {/* Pagination */}
       <div className="mt-4 flex items-center justify-between">
-        <div className="text-sm text-gray-500">Page {page} of {Math.max(1, Math.ceil(total / perPage))}</div>
+        <div className="text-sm text-gray-500">Page {page} of {totalPages}</div>
         <div className="flex items-center gap-2">
           <button
             disabled={page <= 1 || loading}
@@ -279,14 +335,20 @@ export default function ListYoutubeContents({ customerId, perPage = 10 }: Props)
             Prev
           </button>
           <button
-            disabled={page >= Math.max(1, Math.ceil(total / perPage)) || loading}
-            onClick={() => setPage((p) => Math.min(Math.max(1, Math.ceil(total / perPage)), p + 1))}
+            disabled={page >= totalPages || loading}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             className="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-gray-50"
           >
             Next
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <strong>Error:</strong> {error}
+        </div>
+      )}
     </div>
   );
 }

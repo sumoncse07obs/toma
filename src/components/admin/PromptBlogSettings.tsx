@@ -1,16 +1,5 @@
 // src/components/admin/PromptBlogSettings.tsx
 import React from "react";
-
-/**
- * Prompt Blog Settings
- * - Pick a company (customer)
- * - View/Create/Update that customer's prompt set in `prompt_blog`
- */
-
-/* =========================
-   Types
-   ========================= */
-
 export type Customer = {
   id: number;
   customer_number: string;

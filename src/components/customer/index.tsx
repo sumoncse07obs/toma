@@ -3,6 +3,7 @@ import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import DashboardLayout from "@/components/customer/layout/DashboardLayout";
 import Dashboard from "@/components/customer/Dashboard";
+
 import ListBlogContents from "@/components/customer/blog_pages/ListBlogContents";
 import NewBlogContents from "@/components/customer/blog_pages/NewBlogContents";
 import BlogPost from "@/components/customer/blog_pages/BlogPost";
@@ -23,14 +24,19 @@ import NewLaunchContents from "@/components/customer/launch_pages/NewLaunchConte
 import LaunchPost from "@/components/customer/launch_pages/LaunchPost";
 import ViewLaunchContents from "@/components/customer/launch_pages/ViewLaunchContents";
 
-
 import Settings from "@/components/customer/SettingsPage";
+
 import PostToBlotato from "@/components/customer/PostToBlotato";
+import Portfolio from "@/components/customer/Portfolio";
+
 import BlogPromptSettings from "@/components/customer/BlogPromptSettings";
 import YoutubePromptSettings from "@/components/customer/YoutubePromptSettings";
 import TopicPromptSettings from "@/components/customer/TopicPromptSettings";
 import LaunchPromptSettings from "@/components/customer/LaunchPromptSettings";
 
+import SupportHome from "@/components/support/SupportHome";
+import NewSupportTicket from "@/components/support/NewSupportTicket";
+import ViewSupportTicket from "@/components/support/ViewSupportTicket";
 
 export default function CustomerRouter() {
   return (
@@ -65,11 +71,18 @@ export default function CustomerRouter() {
         <Route path="/launch/post/:id" element={<LaunchPost />} />
         <Route path="/launch/posttoblotato/:id" element={<PostToBlotato />} />
 
+        <Route path="/profile" element={<Portfolio />} />
+
+        <Route path= "/support" element= {<SupportHome /> } />
+        <Route path="/support/new" element= {<NewSupportTicket /> } />
+        <Route path="/support/:id" element= {<ViewSupportTicket /> } />
+
+        {/*
         <Route path="/settings/api" element={<Settings />} />
         <Route path="/settings/blog-prompt/" element={<BlogPromptSettings />} />
         <Route path="/settings/youtube-prompt/" element={<YoutubePromptSettings />} />
         <Route path="/settings/topic-prompt/" element={<TopicPromptSettings />} />
-        <Route path="/settings/launch-prompt/" element={<LaunchPromptSettings />} />
+        <Route path="/settings/launch-prompt/" element={<LaunchPromptSettings />} />*/}
 
         
         {/* future routes: youtube, topic, launch */}
