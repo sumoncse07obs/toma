@@ -21,14 +21,12 @@ export default function DashboardLayout() {
       {/* Main area */}
       <div className={collapsed ? "lg:pl-20 flex-1" : "lg:pl-64 flex-1"}>
         <Topbar
-          title="Admin Dashboard"
-          onOpenSidebar={() => setSidebarOpen(true)}
           collapsed={collapsed}
           setCollapsed={setCollapsed}
+          setSidebarOpen={setSidebarOpen}  // ✅ pass the setter used by hamburger
           // rightSlot={<YourButtonOrBadge />}
         />
 
-        {/* Nested pages render here */}
         <main className="min-h-[calc(100vh-4rem)] px-4 lg:px-6 py-8">
           <Outlet />
         </main>

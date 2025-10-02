@@ -7,7 +7,7 @@ type Props = {
   user?: User | null;
   collapsed: boolean;
   setCollapsed: (v: boolean) => void;
-  setSidebarOpen: (v: boolean) => void;
+  setSidebarOpen: (v: boolean) => void;   // ✅ we’ll use this
   supportHref?: string;
 };
 
@@ -39,10 +39,28 @@ export default function Topbar({
 
   return (
     <header className="h-16 px-4 lg:px-6 border-b bg-white flex items-center justify-between">
-      <h1 className="font-semibold text-slate-900">Admin Dashboard</h1>
-
+      {/* Left: mobile hamburger + title */}
       <div className="flex items-center gap-3">
-        {/* Help link */}
+        <button
+          type="button"
+          className="inline-flex lg:hidden items-center justify-center rounded-md border border-slate-200 px-2.5 py-1.5 text-slate-700 hover:bg-slate-100"
+          aria-label="Open sidebar"
+          aria-controls="admin-sidebar"
+          onClick={() => setSidebarOpen(true)}   // ✅ open the slide-in sidebar
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="3" y1="6"  x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+          <span className="sr-only">Open sidebar</span>
+        </button>
+
+        <h1 className="font-semibold text-slate-900">Admin Dashboard</h1>
+      </div>
+
+      {/* Right: help + user menu */}
+      <div className="flex items-center gap-3">
         <Link
           to={supportHref}
           onClick={() => setMenuOpen(false)}
@@ -53,7 +71,6 @@ export default function Topbar({
           ❓ Help
         </Link>
 
-        {/* User menu */}
         <div className="relative" ref={menuRef}>
           <button
             className="flex items-center gap-2 rounded-full border border-slate-200 hover:bg-slate-50 pl-2 pr-3 py-1.5"

@@ -1,8 +1,7 @@
 // src/components/customer/layout/Topbar.tsx
 import React from "react";
-import { useNavigate } from "react-router-dom";
-import { User, currentUser, refreshUser, logout } from "@/auth";
-import { Link } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
+import { User, logout } from "@/auth";
 
 type Props = {
   user: User | null;
@@ -18,7 +17,7 @@ export default function Topbar({
   customerNumber,
   collapsed,            // kept for compatibility
   setCollapsed,         // kept for compatibility
-  setSidebarOpen,       // kept for compatibility
+  setSidebarOpen,       // << we’ll use this on mobile
   supportHref = "/customer/support",
 }: Props) {
   const nav = useNavigate();
@@ -42,11 +41,32 @@ export default function Topbar({
 
   return (
     <header className="h-16 px-4 lg:px-6 border-b bg-white flex items-center justify-between">
-      <h1 className="font-semibold text-slate-900">Customer Dashboard</h1>
+      {/* Left: mobile hamburger + title */}
+      <div className="flex items-center gap-3">
+        {/* Hamburger only on mobile/tablet; hidden on lg+ where sidebar is persistent */}
+        <button
+          type="button"
+          className="inline-flex lg:hidden items-center justify-center rounded-md border border-slate-200 px-2.5 py-1.5 text-slate-700 hover:bg-slate-100"
+          aria-label="Open sidebar"
+          aria-controls="customer-sidebar"
+          onClick={() => setSidebarOpen(true)}
+        >
+          {/* simple hamburger icon */}
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+          <span className="sr-only">Open sidebar</span>
+        </button>
 
+        <h1 className="font-semibold text-slate-900">Customer Dashboard</h1>
+      </div>
+
+      {/* Right: help + user menu */}
       <div className="flex items-center gap-3">
         <Link
-          to="/customer/support"
+          to={supportHref}
           onClick={() => setMenuOpen(false)}
           className="rounded-md px-3 py-2 hover:bg-slate-100 text-slate-700 text-sm"
           aria-label="Support"

@@ -100,8 +100,8 @@ export default function Payment() {
         <div className="mt-10 text-center">
           <p className="text-slate-700">
             Need help? Call{" "}
-            <a href="tel:+1-805-555-0199" className="font-semibold underline">
-              +1 (805) 555-0199
+            <a href="tel:+12693654321" className="font-semibold underline">
+              +1 2693654321
             </a>
           </p>
         </div>

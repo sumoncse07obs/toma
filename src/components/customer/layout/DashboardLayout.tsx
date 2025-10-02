@@ -1,3 +1,4 @@
+// src/components/customer/layout/DashboardLayout.tsx
 import React from "react";
 import { Outlet } from "react-router-dom";
 import Sidebar from "@/components/customer/layout/Sidebar";
