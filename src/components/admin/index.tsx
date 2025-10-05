@@ -18,6 +18,8 @@ import AdminCustomerBlog from "@/components/admin/customer/AdminCustomerBlog";
 import AdminCustomerYouTube from "@/components/admin/customer/AdminCustomerYouTube";
 import AdminCustomerTopic from "@/components/admin/customer/AdminCustomerTopic";
 import AdminCustomerLaunch from "@/components/admin/customer/AdminCustomerLaunch";
+import AdminSettingsPage from "@/components/admin/AdminSettings";
+
 
 export default function AdminRouter() {
   return (
@@ -32,6 +34,7 @@ export default function AdminRouter() {
         <Route path="support/:id" element={<AdminSupportTicket />} />
         <Route path="profile" element={<Portfolio />} />
         <Route path="users" element={<UsersPage />} />
+        <Route path="settings" element={<AdminSettingsPage />} />
       </Route>
 
       {/* === Customer dashboard is a SIBLING route (NOT nested) ===

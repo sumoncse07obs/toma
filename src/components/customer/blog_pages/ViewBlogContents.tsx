@@ -701,6 +701,15 @@ export default function BlogContentsDetails() {
               Reload
             </button>
 
+            {/* NEW: Log button in header */}
+            <Link
+              to={`/customer/blog/log/${content.id}`}
+              className="text-xs px-3 py-1 rounded bg-gray-100 text-gray-800 hover:bg-gray-200"
+              title="View publish logs for this content"
+            >
+              Log
+            </Link>
+
             {content.video_url ? (
               <Link
                 to={`/customer/blog/post/${content.id}`}
@@ -1140,7 +1149,16 @@ export default function BlogContentsDetails() {
         )}
       </div>
 
-      <div className="mt-8 flex justify-end">
+      <div className="mt-8 flex items-center justify-end gap-2">
+        {/* NEW: Log button in footer */}
+        <Link
+          to={`/customer/blog/log/${content.id}`}
+          className="px-4 py-2 rounded bg-gray-100 text-gray-800 hover:bg-gray-200"
+          title="View publish logs for this content"
+        >
+          Log
+        </Link>
+
         {content.video_url ? (
           <Link
             to={`/customer/blog/post/${content.id}`}

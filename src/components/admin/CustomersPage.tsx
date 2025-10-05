@@ -8,6 +8,7 @@ export type Customer = {
   user_id: number;
   customer_number: string;
   business_name?: string | null;
+  business_website?: string | null; // ← NEW
   phone?: string | null;
   address?: string | null;
   city?: string | null;
@@ -93,6 +94,7 @@ const CustomersAPI = {
     password?: string;
     // customer fields
     business_name?: string;
+    business_website?: string; // ← NEW
     phone?: string;
     address?: string;
     city?: string;
@@ -105,7 +107,12 @@ const CustomersAPI = {
     });
   },
 
-  async update(id: number, payload: Partial<Omit<Customer, "id" | "user_id" | "user">>) {
+  async update(
+    id: number,
+    payload: Partial<
+      Omit<Customer, "id" | "user_id" | "user" | "created_at" | "updated_at">
+    >
+  ) {
     return api<Customer>(`/customers/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
@@ -183,6 +190,16 @@ function Badge({ active }: { active: boolean }) {
   );
 }
 
+/** ===== helpers ===== */
+function normalizeWebsite(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  if (!trimmed) return undefined;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  // default to https
+  return `https://${trimmed}`;
+}
+
 /** ===== Create/Edit Modal ===== */
 function CustomerForm({
   mode,
@@ -206,6 +223,7 @@ function CustomerForm({
 
   // Customer fields
   const [business_name, setBusinessName] = useState(initial?.business_name ?? "");
+  const [business_website, setBusinessWebsite] = useState(initial?.business_website ?? ""); // ← NEW
   const [phone, setPhone] = useState(initial?.phone ?? "");
   const [address, setAddress] = useState(initial?.address ?? "");
   const [city, setCity] = useState(initial?.city ?? "");
@@ -218,9 +236,12 @@ function CustomerForm({
     e.preventDefault();
     setSubmitting(true);
     try {
+      const normalizedWebsite = normalizeWebsite(business_website);
+
       if (isEdit && initial?.id) {
         const updated = await CustomersAPI.update(initial.id, {
           business_name,
+          business_website: normalizedWebsite ?? "",
           phone,
           address,
           city,
@@ -234,6 +255,7 @@ function CustomerForm({
           email: user_email,
           password: password || undefined,
           business_name,
+          business_website: normalizedWebsite ?? "",
           phone,
           address,
           city,
@@ -289,13 +311,25 @@ function CustomerForm({
               value={business_name ?? ""}
               onChange={(e) => setBusinessName(e.target.value)}
             />
+            <Input
+              label="Business Website"
+              placeholder="example.com or https://example.com"
+              value={business_website ?? ""}
+              onChange={(e) => setBusinessWebsite(e.target.value)}
+              hint="We'll auto-add https:// if missing."
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Input label="Phone" value={phone ?? ""} onChange={(e) => setPhone(e.target.value)} />
+            <Input label="Address" value={address ?? ""} onChange={(e) => setAddress(e.target.value)} />
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <Input label="Address" value={address ?? ""} onChange={(e) => setAddress(e.target.value)} />
             <Input label="City" value={city ?? ""} onChange={(e) => setCity(e.target.value)} />
             <Input label="State" value={state ?? ""} onChange={(e) => setState(e.target.value)} />
+            {/* kept layout balanced */}
+            <div />
           </div>
 
           <Textarea label="About" value={about ?? ""} onChange={(e) => setAbout(e.target.value)} />
@@ -446,11 +480,13 @@ export default function CustomersPage() {
                       ? c.is_active === 1
                       : (c.is_active as boolean) ?? c.active ?? true;
 
+                  const site = normalizeWebsite(c.business_website ?? "");
+
                   return (
                     <tr
                       key={c.id}
                       className="hover:bg-slate-50/60"
-                      onDoubleClick={() => navigate(dashboardPath(c))} // optional: double-click row to open dashboard
+                      onDoubleClick={() => navigate(dashboardPath(c))}
                       title="Double-click to open dashboard"
                       style={{ cursor: "default" }}
                     >
@@ -468,6 +504,19 @@ export default function CustomersPage() {
                         <div className="text-xs text-slate-500">
                           {c.city || ""}{c.city && c.state ? ", " : ""}{c.state || ""}
                         </div>
+                        {site && (
+                          <div className="text-xs">
+                            <a
+                              href={site}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                              title={site}
+                            >
+                              {c.business_website}
+                            </a>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="text-sm">{c.user?.name ?? "—"}</div>

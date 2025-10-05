@@ -1,4 +1,4 @@
-// src/components/user/LaunchPost.tsx
+// src/components/customer/launch_pages/LaunchPost.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { currentUser } from "@/auth";
@@ -63,8 +63,9 @@ type ContentGeneration = {
   pinterest_description?: string | null;
 };
 
-// Prefer proxy in dev: set VITE_API_BASE="/api". In prod set full origin.
-const API_BASE = `${import.meta.env.VITE_API_BASE}/api`;
+/* ========================= API base (robust) ========================= */
+const RAW_BASE = String(import.meta.env.VITE_API_BASE || "").replace(/\/+$/g, "");
+const API_BASE = RAW_BASE.endsWith("/api") ? RAW_BASE : `${RAW_BASE}/api`;
 const TOKEN_KEY = "toma_token";
 
 /** normalize URL and keep one slash */
@@ -88,7 +89,6 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
-    // try to surface backend error
     const text = await res.text().catch(() => "");
     let msg = text || res.statusText || "Request failed";
     try {
@@ -114,6 +114,25 @@ function getCustomerIdFromAuth(): number {
   );
 }
 
+/* ===================== Status normalization + polling helpers ===================== */
+function normalizeStatus(s: string | null | undefined): "queued" | "posted" | "failed" {
+  const v = String(s || "").toLowerCase();
+  if (["success", "published", "complete", "completed", "posted"].includes(v)) return "posted";
+  if (["fail", "failed", "error"].includes(v)) return "failed";
+  return "queued";
+}
+
+const BASE_POLL_MS = 4000;             // start at 4s
+const MAX_POLL_MS  = 20000;            // cap at 20s
+const MAX_TOTAL_MS = 10 * 60 * 1000;   // give up after 10 min
+
+function nextDelay(prev: number) {
+  const n = Math.min(Math.round(prev * 1.6), MAX_POLL_MS);
+  const jitter = Math.floor(Math.random() * 500);
+  return n + jitter;
+}
+
+/* =============================== Field map =============================== */
 type FieldKeys = { title?: keyof ContentGeneration; content?: keyof ContentGeneration };
 
 const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: FieldKeys }> = {
@@ -137,8 +156,8 @@ const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: Fiel
     image: { title: "x_title",                content: "x_content" },
     video: { title: "x_video_title",          content: "x_video_content" },
   },
-  Reals: { text: {}, image: {}, video: {} }, // UI-only "Reels" option
-  "Tick Tok": {
+  Reels: { text: {}, image: {}, video: {} }, // UI-only "Reels" option
+  TikTok: {
     text:  { title: "tiktok_video_title",     content: "tiktok_video_content" },
     image: { title: "tiktok_video_title",     content: "tiktok_video_content" },
     video: { title: "tiktok_video_title",     content: "tiktok_video_content" },
@@ -160,7 +179,6 @@ const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: Fiel
   },
 };
 
-// helpers
 const isPlayableVideo = (url?: string | null) =>
   !!url && /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url);
 
@@ -172,9 +190,9 @@ const mediaBoxClassBySize: Record<PreviewSize, string> = {
 
 // Normalize FE -> BE platform keys
 function normalizePlatform(ui: string, reelsPlatform: "facebook" | "instagram"): string {
-  if (ui === "Reals") return reelsPlatform === "facebook" ? "facebook_reels" : "instagram_reels";
+  if (ui === "Reels") return reelsPlatform === "facebook" ? "facebook_reels" : "instagram_reels";
   if (ui === "Twitter/X") return "x";
-  if (ui === "Tick Tok") return "tiktok";
+  if (ui === "TikTok") return "tiktok";
   if (ui === "YouTube Short") return "youtube_short";
   if (ui === "Linkedin Business") return "linkedin_page";
   if (ui === "Linkedin Personal") return "linkedin_personal";
@@ -183,8 +201,8 @@ function normalizePlatform(ui: string, reelsPlatform: "facebook" | "instagram"):
 
 // Which post types are allowed per platform (UI rule)
 function allowedPostTypes(ui: string): PostType[] {
-  if (ui === "Reals") return ["video"];
-  if (ui === "Tick Tok") return ["video"];
+  if (ui === "Reels") return ["video"];
+  if (ui === "TikTok") return ["video"];
   if (ui === "YouTube Short") return ["video"];
   if (ui === "Instagram") return ["image", "video"]; // no text-only
   return ["text", "image", "video"];
@@ -193,6 +211,7 @@ function allowedPostTypes(ui: string): PostType[] {
 // format date safely
 const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : "—");
 
+/* =============================== Component =============================== */
 export default function LaunchPost() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -228,10 +247,26 @@ export default function LaunchPost() {
   const [postedOnIso, setPostedOnIso] = useState<string | null>(null);
   const [publicUrl, setPublicUrl] = useState<string | null>(null);
 
+  // UI: overlay whenever we're waiting for final status and we have a log/submission
+  const showStatusOverlay =
+    publishStatus === "queued" && (!!lastSubmissionId || !!lastPublishLogId);
+
+  // debug heartbeat
+  const [lastCheckAt, setLastCheckAt] = useState<number | null>(null);
+  const [lastStatusRaw, setLastStatusRaw] = useState<string | null>(null);
+  const [nextPollInMs, setNextPollInMs] = useState<number | null>(null);
+  const [latestLogPollMs, setLatestLogPollMs] = useState<number>(5000);
+
   const customerId = useMemo(() => getCustomerIdFromAuth(), []);
   const platforms = Object.keys(FIELD_MAP);
 
-  // load record
+  const platformKey = useMemo(
+    () => normalizePlatform(selectedPlatform, reelsPlatform),
+    [selectedPlatform, reelsPlatform]
+  );
+  const effectivePostType: PostType = selectedPlatform === "Reels" ? "video" : postType;
+
+  /* ----------------------------- load record ----------------------------- */
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -259,7 +294,7 @@ export default function LaunchPost() {
     return () => { cancelled = true; };
   }, [id]);
 
-  // persist video_url
+  /* -------------------------- persist video_url -------------------------- */
   async function persistVideoUrl(url: string) {
     if (!record?.id) return;
     const trimmed = (url ?? "").trim();
@@ -279,8 +314,6 @@ export default function LaunchPost() {
       setVideoSaveError(err?.message || "Failed to save video URL");
     }
   }
-
-  // debounce save on change
   useEffect(() => {
     if (!record?.id) return;
     const trimmed = (videoUrl ?? "").trim();
@@ -289,11 +322,11 @@ export default function LaunchPost() {
     return () => clearTimeout(t);
   }, [videoUrl, record?.id, record?.video_url]);
 
-  // map fields -> title/description shown
+  /* --------------------- map fields -> title/description --------------------- */
   useEffect(() => {
     if (!record) return;
     let keys: FieldKeys | undefined;
-    if (selectedPlatform === "Reals") {
+    if (selectedPlatform === "Reels") {
       keys =
         reelsPlatform === "facebook"
           ? { title: "facebook_reels_title", content: "facebook_reels_content" }
@@ -309,41 +342,34 @@ export default function LaunchPost() {
     setDescription(newContent);
   }, [selectedPlatform, postType, reelsPlatform, record]);
 
-  // when switching platforms, force a valid postType for that platform
   const pickPlatform = (p: string) => {
     setSelectedPlatform(p);
-    if (p === "Reals") {
-      setReelsPlatform("facebook");
-    }
+    if (p === "Reels") setReelsPlatform("facebook");
     const allowed = allowedPostTypes(p);
     setPostType((prev) => (allowed.includes(prev) ? prev : allowed[0]));
   };
 
-  // preview data
   const previewMedia = useMemo(() => {
     const img = record?.image_url || "";
     const vid = (videoUrl || record?.video_url || "").trim();
     return {
-      showImage: selectedPlatform !== "Reals" && postType === "image",
+      showImage: selectedPlatform !== "Reels" && postType === "image",
       imageUrl: img,
       showVideo: postType === "video",
       videoUrl: vid,
     };
   }, [postType, selectedPlatform, record?.image_url, record?.video_url, videoUrl]);
 
-  // ---- Load latest publish log on mount / platform change ----
+  /* -------------- load latest log (prefers final_status/publicUrl) -------------- */
   useEffect(() => {
     if (!record?.id) return;
-
-    const platformKey = normalizePlatform(selectedPlatform, reelsPlatform);
-    const post_type_normalized: PostType = selectedPlatform === "Reals" ? "video" : postType;
 
     const loadLatest = async () => {
       try {
         const params = new URLSearchParams({
           content_generation_id: String(record.id),
           platform: platformKey,
-          post_type: post_type_normalized,
+          post_type: effectivePostType,
         });
         const js = await api<any>(`/publish/logs/latest?${params.toString()}`, {
           headers: { Accept: "application/json" },
@@ -359,74 +385,214 @@ export default function LaunchPost() {
           return;
         }
 
-        const st = (log.status as "queued" | "posted" | "failed") ?? "queued";
-        setPublishStatus(st);
-        setPostedOnIso(log.posted_on ?? null);
-        setPublicUrl(log.public_url ?? null);
-        setLastSubmissionId(log.provider_post_id ?? null);
+        // prefer new final_status if present
+        const finalStatus = String(log.final_status || "").toLowerCase(); // 'published' | 'failed' | ''
+        if (finalStatus === "published") {
+          setPublishStatus("posted");
+          setPublicUrl(log.publicUrl ?? null);
+          setPostedOnIso(log.posted_on ?? null);
+        } else if (finalStatus === "failed") {
+          setPublishStatus("failed");
+          setPostedOnIso(log.posted_on ?? null);
+        } else {
+          // fallback to legacy status column + legacy public_url casing
+          const st = (log.status as "queued" | "posted" | "failed") ?? "queued";
+          setPublishStatus(st);
+          setPostedOnIso(log.posted_on ?? null);
+          setPublicUrl(log.publicUrl ?? log.public_url ?? null);
+        }
+
+        const subId: string | null = log.provider_post_id ?? null;
+        setLastSubmissionId(subId);
         setLastPublishLogId(log.id ?? null);
       } catch {
-        // ignore for UX
+        // silent
       }
     };
 
     void loadLatest();
-  }, [record?.id, selectedPlatform, reelsPlatform, postType]);
+  }, [record?.id, platformKey, effectivePostType]);
 
-  // Poll Blotato status endpoint (backend proxy) until published/failed
+  /* ---- If we don't have provider_post_id yet, keep polling latestLog ---- */
+  useEffect(() => {
+    if (!record?.id) return;
+    if (lastSubmissionId) return;
+    if (publishStatus === "posted" || publishStatus === "failed") return;
+
+    let stop = false;
+    let t: number | undefined;
+
+    async function pollLatest() {
+      try {
+        const params = new URLSearchParams({
+          content_generation_id: String(record.id),
+          platform: platformKey,
+          post_type: effectivePostType,
+        });
+        const js = await api<any>(`/publish/logs/latest?${params.toString()}`);
+        const log = js?.data;
+
+        if (stop) return;
+
+        if (log) {
+          const finalStatus = String(log.final_status || "").toLowerCase();
+          if (finalStatus === "published") {
+            setPublishStatus("posted");
+            setPublicUrl(log.publicUrl ?? null);
+            setPostedOnIso(log.posted_on ?? null);
+            setLastPublishLogId(log.id ?? null);
+            return;
+          }
+          if (finalStatus === "failed") {
+            setPublishStatus("failed");
+            setPostedOnIso(log.posted_on ?? null);
+            setLastPublishLogId(log.id ?? null);
+            return;
+          }
+
+          const st = (log.status as "queued" | "posted" | "failed") ?? "queued";
+          setPublishStatus(st);
+          setPostedOnIso(log.posted_on ?? null);
+          setPublicUrl(log.publicUrl ?? log.public_url ?? null);
+          setLastPublishLogId(log.id ?? null);
+
+          const subId: string | null = log.provider_post_id ?? null;
+          if (subId) {
+            setLastSubmissionId(subId);
+            void fetchStatusOnce(subId); // kick a first check
+            return;
+          }
+        }
+      } catch {/* ignore */}
+      const next = Math.min(latestLogPollMs * 1.5, 15000);
+      setLatestLogPollMs(next);
+      t = window.setTimeout(pollLatest, next);
+    }
+
+    t = window.setTimeout(pollLatest, latestLogPollMs);
+    return () => {
+      stop = true;
+      if (t) clearTimeout(t);
+    };
+  }, [record?.id, lastSubmissionId, publishStatus, platformKey, effectivePostType, latestLogPollMs]);
+
+  /* ------------------ one-shot status fetch (updates UI) ------------------ */
+  async function fetchStatusOnce(subId: string) {
+    try {
+      const js = await api<any>(`/publish/status/${subId}`);
+      setLastCheckAt(Date.now());
+      setLastStatusRaw(String(js?.status ?? ""));
+      const uiStatus = normalizeStatus(js?.status);
+
+      if (uiStatus === "posted") {
+        setPublishStatus("posted");
+        setPublicUrl(js?.publicUrl || null);
+        setPostedOnIso(new Date().toISOString());
+      } else if (uiStatus === "failed") {
+        setPublishStatus("failed");
+      } else {
+        setPublishStatus("queued");
+      }
+    } catch {
+      setLastCheckAt(Date.now());
+    }
+  }
+
+  /* --------------- Adaptive polling against /publish/status --------------- */
   useEffect(() => {
     if (!lastSubmissionId) return;
     if (publishStatus === "posted" || publishStatus === "failed") return;
 
-    let stop = false;
+    let cancelled = false;
+    let delay = BASE_POLL_MS;
+    let totalElapsed = 0;
+    let timeoutId: number | undefined;
     const controller = new AbortController();
 
-    const check = async () => {
+    function shouldPollNow() {
+      return typeof document !== "undefined"
+        ? document.visibilityState === "visible"
+        : true;
+    }
+
+    async function pollOnce(): Promise<boolean> {
       try {
-        const js = await api<any>(`/publish/status/${lastSubmissionId}`, {
-          signal: controller.signal,
-        });
-        const st = (js?.status ?? "queued") as string;
-        if (st === "published") {
+        const js = await api<any>(`/publish/status/${lastSubmissionId}`, { signal: controller.signal });
+        setLastCheckAt(Date.now());
+        setLastStatusRaw(String(js?.status ?? ""));
+        const uiStatus = normalizeStatus(js?.status);
+
+        if (uiStatus === "posted") {
           setPublishStatus("posted");
           setPublicUrl(js?.publicUrl || null);
           setPostedOnIso(new Date().toISOString());
+          setNextPollInMs(null);
           return true;
         }
-        if (st === "failed") {
+        if (uiStatus === "failed") {
           setPublishStatus("failed");
+          setNextPollInMs(null);
           return true;
         }
+
+        setPublishStatus("queued");
         return false;
       } catch {
+        setLastCheckAt(Date.now());
         return false;
       }
-    };
+    }
 
-    (async () => {
-      const done = await check();
-      if (done) return;
-      const iv = setInterval(async () => {
-        if (stop) return clearInterval(iv);
-        const finished = await check();
-        if (finished) clearInterval(iv);
-      }, 10000);
-    })();
+    async function loop() {
+      if (cancelled) return;
+
+      if (!shouldPollNow()) {
+        setNextPollInMs(2000);
+        timeoutId = window.setTimeout(loop, 2000);
+        return;
+      }
+
+      const done = await pollOnce();
+      if (cancelled || done) return;
+
+      totalElapsed += delay;
+      if (totalElapsed >= MAX_TOTAL_MS) {
+        setPublishStatus("queued");
+        setNextPollInMs(null);
+        return;
+      }
+
+      delay = nextDelay(delay);
+      setNextPollInMs(delay);
+      timeoutId = window.setTimeout(loop, delay);
+    }
+
+    loop();
+
+    const visHandler = () => {
+      if (document.visibilityState === "visible") {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = window.setTimeout(loop, 500);
+      }
+    };
+    document.addEventListener("visibilitychange", visHandler);
 
     return () => {
-      stop = true;
+      cancelled = true;
       controller.abort();
+      if (timeoutId) clearTimeout(timeoutId);
+      document.removeEventListener("visibilitychange", visHandler);
     };
   }, [lastSubmissionId, publishStatus]);
 
-  // Approve & Publish
+  /* -------------------------- Approve & Publish -------------------------- */
   async function approve() {
     if (!record?.id) return;
     setApproveStatus("posting");
     setApproveError(null);
 
     let keys: FieldKeys;
-    if (selectedPlatform === "Reals") {
+    if (selectedPlatform === "Reels") {
       keys =
         reelsPlatform === "facebook"
           ? { title: "facebook_reels_title", content: "facebook_reels_content" }
@@ -435,9 +601,7 @@ export default function LaunchPost() {
       keys = FIELD_MAP[selectedPlatform][postType];
     }
 
-    const platformKey = normalizePlatform(selectedPlatform, reelsPlatform);
-    const post_type_normalized: PostType =
-      selectedPlatform === "Reals" ? "video" : postType;
+    const post_type_normalized: PostType = selectedPlatform === "Reels" ? "video" : postType;
 
     const media_payload =
       post_type_normalized === "image"
@@ -458,10 +622,7 @@ export default function LaunchPost() {
     };
 
     try {
-      const json = await api<any>("/publish", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      const json = await api<any>("/publish", { method: "POST", body: JSON.stringify(body) });
 
       const first = Array.isArray(json?.data) ? json.data[0] : json?.data;
       const submissionId: string | null = first?.provider_post_id ?? null;
@@ -483,30 +644,70 @@ export default function LaunchPost() {
     }
   }
 
+  async function refreshNow() {
+    if (lastSubmissionId) {
+      await fetchStatusOnce(lastSubmissionId);
+    } else if (record?.id) {
+      const params = new URLSearchParams({
+        content_generation_id: String(record.id),
+        platform: platformKey,
+        post_type: effectivePostType,
+      });
+      try {
+        const js = await api<any>(`/publish/logs/latest?${params.toString()}`);
+        const log = js?.data;
+        if (log?.provider_post_id) {
+          setLastSubmissionId(log.provider_post_id);
+          await fetchStatusOnce(log.provider_post_id);
+        }
+      } catch {}
+    }
+  }
+
+  /* -------------------------------- Render -------------------------------- */
   if (loading) return <div className="p-6">Loading post…</div>;
   if (loadError) return <div className="p-6 text-red-600">Failed to load: {loadError}</div>;
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-8 px-4">
+      {/* ====== Overlay while we wait for final status ====== */}
+      {showStatusOverlay && (
+        <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] flex items-center justify-center">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-80 text-center">
+            <div className="mx-auto mb-3 h-6 w-6 rounded-full border-2 border-gray-300 border-t-transparent animate-spin" />
+            <div className="text-sm text-gray-800 font-medium">
+              Please wait — getting post status from Blotato…
+            </div>
+            <div className="text-[11px] text-gray-500 mt-2">
+              This can take 1–3 minutes for video posts.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <h1 className="text-xl font-semibold mb-2">
         Toma <span className="font-bold">Launch</span> Automation
       </h1>
-      {/*<div className="text-xs text-gray-500 mb-4">
-        Customer ID: <span className="font-medium">{customerId}</span> • Content ID:{" "}
-        <span className="font-medium">{record?.id}</span>
-      </div> */}
 
-      {/* Back button */}
-      <button
-        className="mb-6 bg-teal-500 text-white px-6 py-2 rounded-md hover:bg-teal-600"
-        onClick={() => {
-          const targetId = record?.id ?? (id ? parseInt(id, 10) : null);
-          if (targetId) navigate(`/customer/launch/view/${targetId}`);
-        }}
-      >
-        Back
-      </button>
+      {/* Back + Refresh */}
+      <div className="mb-6 flex items-center gap-3">
+        <button
+          className="bg-teal-500 text-white px-6 py-2 rounded-md hover:bg-teal-600"
+          onClick={() => {
+            const targetId = record?.id ?? (id ? parseInt(id, 10) : null);
+            if (targetId) navigate(`/customer/launch/view/${targetId}`);
+          }}
+        >
+          Back
+        </button>
+        <button
+          className="bg-gray-100 text-gray-800 px-4 py-2 rounded-md border border-gray-300 hover:bg-gray-200"
+          onClick={() => void refreshNow()}
+        >
+          Refresh status
+        </button>
+      </div>
 
       {/* Video URL row */}
       <div className="flex gap-3 items-center w-full max-w-4xl mb-1">
@@ -575,7 +776,7 @@ export default function LaunchPost() {
           />
 
           {/* Radios */}
-          {selectedPlatform === "Reals" ? (
+          {selectedPlatform === "Reels" ? (
             <div className="space-y-2">
               <label className="flex items-center gap-2">
                 <input type="radio" checked={reelsPlatform === "facebook"} onChange={() => setReelsPlatform("facebook")} />
@@ -674,12 +875,30 @@ export default function LaunchPost() {
                 Submission ID: <span className="font-mono">{lastSubmissionId}</span>
               </div>
             )}
+
+            {/* Heartbeat line so you can see it polling */}
+            <div className="text-[11px] text-gray-400 mt-1">
+              {lastCheckAt && <>Last check: {new Date(lastCheckAt).toLocaleTimeString()} </>}
+              {typeof lastStatusRaw === "string" && lastStatusRaw && <>• raw: {lastStatusRaw} </>}
+              {nextPollInMs && <>• next in ~{Math.round(nextPollInMs / 1000)}s</>}
+              {!lastSubmissionId && <>Waiting for submission id…</>}
+            </div>
+
+            <a
+              href={`/customer/launch/log/${record?.id ?? id}`}
+              className="text-blue-600 hover:underline"
+            >
+              View Publish Logs
+            </a>
           </div>
 
           <div className="min-h-5 text-xs">
             {approveStatus === "posted" && <span className="text-green-600">Submitted to Blotato.</span>}
             {approveStatus === "error" && (
               <span className="text-red-600">Publish failed{approveError ? `: ${approveError}` : ""}</span>
+            )}
+            {publishStatus === "queued" && (
+              <span className="text-amber-600">Processing on the platform… video posts may take 1–3 minutes.</span>
             )}
           </div>
         </div>
@@ -689,7 +908,7 @@ export default function LaunchPost() {
           <div className="flex items-center justify-between mb-3">
             <div className="text-sm font-semibold text-gray-700">
               Live Preview ·{" "}
-              {selectedPlatform === "Reals"
+              {selectedPlatform === "Reels"
                 ? `Reels · ${reelsPlatform === "facebook" ? "Facebook" : "Instagram"}`
                 : `${selectedPlatform} · ${postType.toUpperCase()}`}
             </div>

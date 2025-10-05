@@ -279,6 +279,13 @@ export default function ListLaunchContents({ customerId, perPage = 10 }: Props) 
         <h1 className="text-xl font-semibold">Launch Automation</h1>
         <div className="flex gap-2">
           <Link
+            to="/customer/logs/launch/"
+            className="rounded-lg bg-gray-600 text-white px-4 py-2 text-sm hover:bg-blue-700 transition-colors"
+          >
+            Log
+          </Link>
+
+          <Link
             to="/customer/launch/new"
             className="rounded-lg bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700 transition-colors"
           >

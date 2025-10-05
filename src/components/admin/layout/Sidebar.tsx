@@ -14,6 +14,7 @@ const navItems = [
   { to: "/admin/customers",             label: "Customers",         icon: "👥" },
   { to: "/admin/support",                label: "Help", icon: "❓" },
   { to: "/admin/users",                 label: "Users",             icon: "👥" },
+  { to: "/admin/settings",                 label: "settings",             icon: "⚙️" },
 ];
 
 export default function Sidebar({ open, setOpen, collapsed, setCollapsed }: Props) {

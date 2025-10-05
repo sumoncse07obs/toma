@@ -1,6 +1,6 @@
-// src/components/customer/youtube_page/YoutubePost.tsx
+// src/components/customer/PublishPost.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { currentUser } from "@/auth";
 
 type PostType = "text" | "image" | "video";
@@ -111,9 +111,9 @@ function normalizeStatus(s: string | null | undefined): "queued" | "posted" | "f
   return "queued";
 }
 
-const BASE_POLL_MS = 4000;            // start at 4s
-const MAX_POLL_MS  = 20000;           // cap at 20s
-const MAX_TOTAL_MS = 10 * 60 * 1000;  // give up after 10 minutes
+const BASE_POLL_MS = 4000;      // start at 4s
+const MAX_POLL_MS  = 20000;     // cap at 20s
+const MAX_TOTAL_MS = 10 * 60 * 1000; // give up after 10 min
 
 function nextDelay(prev: number) {
   const n = Math.min(Math.round(prev * 1.6), MAX_POLL_MS);
@@ -126,45 +126,45 @@ type FieldKeys = { title?: keyof ContentGeneration; content?: keyof ContentGener
 
 const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: FieldKeys }> = {
   Facebook: {
-    text:  { title: "facebook_title",       content: "facebook_content" },
-    image: { title: "facebook_title",       content: "facebook_content" },
-    video: { title: "facebook_video_title", content: "facebook_video_content" },
+    text:  { title: "facebook_title",         content: "facebook_content" },
+    image: { title: "facebook_title",         content: "facebook_content" },
+    video: { title: "facebook_video_title",   content: "facebook_video_content" },
   },
   Instagram: {
-    text:  { title: "instagram_title",      content: "instagram_content" },
-    image: { title: "instagram_title",      content: "instagram_content" },
-    video: { title: "instagram_video_title",content: "instagram_video_content" },
+    text:  { title: "instagram_title",        content: "instagram_content" },
+    image: { title: "instagram_title",        content: "instagram_content" },
+    video: { title: "instagram_video_title",  content: "instagram_video_content" },
   },
   Threads: {
-    text:  { title: "threads_title",        content: "threads_content" },
-    image: { title: "threads_title",        content: "threads_content" },
-    video: { title: "threads_video_title",  content: "threads_video_content" },
+    text:  { title: "threads_title",          content: "threads_content" },
+    image: { title: "threads_title",          content: "threads_content" },
+    video: { title: "threads_video_title",    content: "threads_video_content" },
   },
   "Twitter/X": {
-    text:  { title: "x_title",              content: "x_content" },
-    image: { title: "x_title",              content: "x_content" },
-    video: { title: "x_video_title",        content: "x_video_content" },
+    text:  { title: "x_title",                content: "x_content" },
+    image: { title: "x_title",                content: "x_content" },
+    video: { title: "x_video_title",          content: "x_video_content" },
   },
-  Reals: { text: {}, image: {}, video: {} }, // UI-only "Reels"
+  Reals: { text: {}, image: {}, video: {} },
   "Tick Tok": {
-    text:  { title: "tiktok_video_title",   content: "tiktok_video_content" },
-    image: { title: "tiktok_video_title",   content: "tiktok_video_content" },
-    video: { title: "tiktok_video_title",   content: "tiktok_video_content" },
+    text:  { title: "tiktok_video_title",     content: "tiktok_video_content" },
+    image: { title: "tiktok_video_title",     content: "tiktok_video_content" },
+    video: { title: "tiktok_video_title",     content: "tiktok_video_content" },
   },
   "Linkedin Business": {
-    text:  { title: "linkedin_title",       content: "linkedin_content" },
-    image: { title: "linkedin_title",       content: "linkedin_content" },
-    video: { title: "linkedin_video_title", content: "linkedin_video_content" },
+    text:  { title: "linkedin_title",         content: "linkedin_content" },
+    image: { title: "linkedin_title",         content: "linkedin_content" },
+    video: { title: "linkedin_video_title",   content: "linkedin_video_content" },
   },
   "Linkedin Personal": {
-    text:  { title: "linkedin_title",       content: "linkedin_content" },
-    image: { title: "linkedin_title",       content: "linkedin_content" },
-    video: { title: "linkedin_video_title", content: "linkedin_video_content" },
+    text:  { title: "linkedin_title",         content: "linkedin_content" },
+    image: { title: "linkedin_title",         content: "linkedin_content" },
+    video: { title: "linkedin_video_title",   content: "linkedin_video_content" },
   },
   "YouTube Short": {
-    text:  { title: "youtube_video_title",  content: "youtube_video_description" },
-    image: { title: "youtube_video_title",  content: "youtube_video_description" },
-    video: { title: "youtube_video_title",  content: "youtube_video_description" },
+    text:  { title: "youtube_video_title",    content: "youtube_video_description" },
+    image: { title: "youtube_video_title",    content: "youtube_video_description" },
+    video: { title: "youtube_video_title",    content: "youtube_video_description" },
   },
 };
 
@@ -189,10 +189,59 @@ function allowedPostTypes(ui: string): PostType[] {
 }
 const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : "—");
 
+/* ====== Scheduling helpers ====== */
+function roundToNext5Min(d = new Date()) {
+  const ms = 1000 * 60 * 5;
+  return new Date(Math.ceil(d.getTime() / ms) * ms);
+}
+function toLocalInputValue(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const h = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  return `${y}-${m}-${day}T${h}:${min}`;
+}
+function localInputToISO(v: string) {
+  // Treat the value as local time, then convert to ISO (UTC)
+  const dt = new Date(v.replace(" ", "T"));
+  return isNaN(dt.getTime()) ? null : dt.toISOString();
+}
+
+// ---- UTC clock helpers (seconds precision, no milliseconds) ----
+function nowUtcIsoSeconds() {
+  const d = new Date();
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mi = String(d.getUTCMinutes()).padStart(2, "0");
+  const ss = String(d.getUTCSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}Z`;
+}
+
 /* =============================== Component =============================== */
-export default function YoutubePost() {
+export default function PublishPost() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+
+  // ------- derive dynamic context (blog | youtube | topic | launch) -------
+  const context = useMemo<"blog" | "youtube" | "topic" | "launch">(() => {
+    const p = pathname.toLowerCase();
+    if (p.includes("/customer/youtube/") || p.includes("/youtube/")) return "youtube";
+    if (p.includes("/customer/topic/")   || p.includes("/topic/"))   return "topic";
+    if (p.includes("/customer/launch/")  || p.includes("/launch/"))  return "launch";
+    return "blog";
+  }, [pathname]);
+
+  const TITLE_BY_CONTEXT: Record<typeof context, string> = {
+    blog: "Toma Blog Automation",
+    youtube: "Toma YouTube Automation",
+    topic: "Toma Topic Automation",
+    launch: "Toma Launch Automation",
+  };
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -222,8 +271,8 @@ export default function YoutubePost() {
   const [postedOnIso, setPostedOnIso] = useState<string | null>(null);
   const [publicUrl, setPublicUrl] = useState<string | null>(null);
 
-  // UI: overlay when waiting for final status
-  const showStatusOverlay = (publishStatus === "queued") && (!!lastSubmissionId || !!lastPublishLogId);
+  // UI: overlay while waiting for final status (disabled per your note)
+  const showStatusOverlay = false;
 
   // debug heartbeat
   const [lastCheckAt, setLastCheckAt] = useState<number | null>(null);
@@ -233,11 +282,39 @@ export default function YoutubePost() {
 
   const customerId = useMemo(() => getCustomerIdFromAuth(), []);
   const platforms = Object.keys(FIELD_MAP);
+
   const platformKey = useMemo(
     () => normalizePlatform(selectedPlatform, reelsPlatform),
     [selectedPlatform, reelsPlatform]
   );
   const effectivePostType: PostType = selectedPlatform === "Reals" ? "video" : postType;
+
+  // ====== dynamic links (Back / Logs) ======
+  const contentId = record?.id ?? (id ? parseInt(id, 10) : null);
+  const backUrl = useMemo(
+    () => (contentId != null ? `/customer/${context}/view/${contentId}` : "/customer"),
+    [context, contentId]
+  );
+  const logsUrl = useMemo(
+    () => (contentId != null ? `/customer/${context}/log/${contentId}` : "#"),
+    [context, contentId]
+  );
+
+  // ====== Scheduling modal state ======
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduledAtLocal, setScheduledAtLocal] = useState<string>("");
+  const [scheduleErr, setScheduleErr] = useState<string | null>(null);
+
+  // ====== UTC clock state (for modal) ======
+  const [nowUtcIso, setNowUtcIso] = useState<string>(nowUtcIsoSeconds());
+
+  // Tick UTC clock while modal is open
+  useEffect(() => {
+    if (!showSchedule) return;
+    setNowUtcIso(nowUtcIsoSeconds());
+    const t = window.setInterval(() => setNowUtcIso(nowUtcIsoSeconds()), 1000);
+    return () => clearInterval(t);
+  }, [showSchedule]);
 
   /* ----------------------------- load record ----------------------------- */
   useEffect(() => {
@@ -254,6 +331,10 @@ export default function YoutubePost() {
         const initial: PostType = data.video_url ? "video" : "text";
         const allowed = allowedPostTypes("Facebook");
         setPostType(allowed.includes(initial) ? initial : allowed[0]);
+
+        // Default schedule time ~10 minutes from now (rounded)
+        const def = roundToNext5Min(new Date(Date.now() + 10 * 60 * 1000));
+        setScheduledAtLocal(toLocalInputValue(def));
       } catch (e: any) {
         if (!cancelled) setLoadError(e.message || "Failed to load");
       } finally {
@@ -352,7 +433,6 @@ export default function YoutubePost() {
           return;
         }
 
-        // Prefer new final_status when present
         const finalStatus = String(log.final_status || "").toLowerCase(); // 'published' | 'failed' | ''
         if (finalStatus === "published") {
           setPublishStatus("posted");
@@ -362,7 +442,6 @@ export default function YoutubePost() {
           setPublishStatus("failed");
           setPostedOnIso(log.posted_on ?? null);
         } else {
-          // fallback to legacy columns
           const st = (log.status as "queued" | "posted" | "failed") ?? "queued";
           setPublishStatus(st);
           setPostedOnIso(log.posted_on ?? null);
@@ -373,7 +452,7 @@ export default function YoutubePost() {
         setLastSubmissionId(subId);
         setLastPublishLogId(log.id ?? null);
       } catch {
-        // silent for UX
+        // silent
       }
     };
 
@@ -426,7 +505,7 @@ export default function YoutubePost() {
           const subId: string | null = log.provider_post_id ?? null;
           if (subId) {
             setLastSubmissionId(subId);
-            // kick a first status check
+            // kick a first check
             void fetchStatusOnce(subId);
             return;
           }
@@ -554,7 +633,7 @@ export default function YoutubePost() {
   }, [lastSubmissionId, publishStatus]);
 
   /* -------------------------- Approve & Publish -------------------------- */
-  async function approve() {
+  async function approve(scheduledAtIso?: string) {
     if (!record?.id) return;
     setApproveStatus("posting");
     setApproveError(null);
@@ -578,7 +657,7 @@ export default function YoutubePost() {
         ? { video_url: (videoUrl || record?.video_url || "").trim() || null }
         : {};
 
-    const body = {
+    const body: any = {
       content_generation_id: record.id,
       customer_id: customerId,
       platform: platformKey,
@@ -588,6 +667,10 @@ export default function YoutubePost() {
       content: description,
       ...media_payload,
     };
+
+    if (scheduledAtIso) {
+      body.scheduled_at = scheduledAtIso; // backend interprets as UTC ISO
+    }
 
     try {
       const json = await api<any>("/publish", { method: "POST", body: JSON.stringify(body) });
@@ -606,6 +689,7 @@ export default function YoutubePost() {
 
       setApproveStatus("posted");
       setTimeout(() => setApproveStatus("idle"), 1200);
+      setShowSchedule(false);
     } catch (err: any) {
       setApproveStatus("error");
       setApproveError(err?.message || "Failed to publish");
@@ -654,17 +738,14 @@ export default function YoutubePost() {
       )}
 
       {/* Header */}
-      <h1 className="text-xl font-semibold mb-2">
-        Toma <span className="font-bold">Youtube</span> Automation
-      </h1>
+      <h1 className="text-xl font-semibold mb-2">{TITLE_BY_CONTEXT[context]}</h1>
 
       {/* Back + Refresh */}
       <div className="mb-6 flex items-center gap-3">
         <button
           className="bg-teal-500 text-white px-6 py-2 rounded-md hover:bg-teal-600"
           onClick={() => {
-            const targetId = record?.id ?? (id ? parseInt(id, 10) : null);
-            if (targetId) navigate(`/customer/youtube/view/${targetId}`);
+            if (contentId != null) navigate(backUrl);
           }}
         >
           Back
@@ -783,7 +864,12 @@ export default function YoutubePost() {
           <button
             className="w-full bg-orange-500 text-white py-2 rounded-md hover:bg-orange-600"
             onClick={() => {
-              alert("Scheduling stub — wire this to your API.");
+              setScheduleErr(null);
+              if (!scheduledAtLocal) {
+                const def = roundToNext5Min(new Date(Date.now() + 10 * 60 * 1000));
+                setScheduledAtLocal(toLocalInputValue(def));
+              }
+              setShowSchedule(true);
             }}
           >
             Schedule The Post
@@ -839,11 +925,12 @@ export default function YoutubePost() {
             </div>
 
             <a
-              href={`/customer/youtube/log/${record?.id ?? id}`}
+              href={logsUrl}
               className="text-blue-600 hover:underline"
             >
               View Publish Logs
             </a>
+
           </div>
 
           <div className="min-h-5 text-xs">
@@ -909,6 +996,101 @@ export default function YoutubePost() {
           </div>
         </div>
       </div>
+
+      {/* ====== Schedule Modal ====== */}
+      {showSchedule && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowSchedule(false)}
+          />
+          {/* Dialog */}
+          <div className="relative z-10 w-[92vw] max-w-md rounded-xl bg-white shadow-2xl border border-gray-200 p-5">
+            <div className="flex items-start justify-between">
+              <h2 className="text-lg font-semibold">Schedule this post</h2>
+              <button
+                className="text-gray-400 hover:text-gray-600"
+                onClick={() => setShowSchedule(false)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-600 mt-2">
+              Choose a future date &amp; time. The picker shows <strong>your local/system time</strong>.
+            </p>
+
+            {/* Current times for comparison 
+            <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
+              <div>
+                Current UTC (ISO-8601):{" "}
+                <span className="font-mono">{nowUtcIso}</span>
+              </div>
+              <div className="mt-1">
+                Your local now:{" "}
+                <span className="font-mono">{new Date().toLocaleString()}</span>
+                <p className="text-center mt-2">Can you add if you want to post to another time zone just adjust it accordingly.</p>
+              </div>
+            </div>*/}
+
+            <div className="mt-4">
+              <label className="text-sm font-medium text-gray-700">Date &amp; time</label>
+              <input
+                type="datetime-local"
+                value={scheduledAtLocal}
+                onChange={(e) => setScheduledAtLocal(e.target.value)}
+                className="mt-1 w-full h-11 border border-gray-300 rounded-md px-3 outline-none focus:ring-2 focus:ring-teal-400"
+              />
+              {scheduleErr && <div className="text-xs text-red-600 mt-1">{scheduleErr}</div>}
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100"
+                onClick={() => setShowSchedule(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className={`px-4 py-2 rounded-md text-white ${
+                  approveStatus === "posting" ? "bg-teal-300 cursor-not-allowed" : "bg-teal-600 hover:bg-teal-700"
+                }`}
+                disabled={approveStatus === "posting"}
+                onClick={() => {
+                  setScheduleErr(null);
+
+                  if (!scheduledAtLocal) {
+                    setScheduleErr("Please pick a date & time.");
+                    return;
+                  }
+
+                  const iso = localInputToISO(scheduledAtLocal);
+                  if (!iso) {
+                    setScheduleErr("Invalid date/time.");
+                    return;
+                  }
+
+                  const when = new Date(iso).getTime();
+                  if (isNaN(when) || when <= Date.now() + 60 * 1000) {
+                    setScheduleErr("Please pick a time at least 1 minute in the future.");
+                    return;
+                  }
+
+                  // UI feedback immediately; approve() also sets this but we flip it early for snappier UX
+                  setApproveStatus("posting");
+                  void approve(iso);
+                  // on success approve() will setApproveStatus("posted") and setShowSchedule(false)
+                }}
+              >
+                {approveStatus === "posting" ? "Posting…" : "Approve & Schedule"}
+              </button>
+
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

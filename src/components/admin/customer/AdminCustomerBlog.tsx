@@ -59,6 +59,90 @@ export type PromptSetting = {
 };
 
 /* =========================
+   DEFAULTS (from your MySQL seed)
+   ========================= */
+
+const DEFAULT_BLOG_PROMPTS: Omit<
+  PromptSetting,
+  "id" | "customer_id" | "prompt_for" | "created_at" | "updated_at" | "is_active"
+> = {
+  summary_prompt:
+    "Summarize the following blog post in under 200 words. Maintain a clear, insightful, and friendly tone. Highlight the key differences between ETFs and individual stocks, including their respective advantages and considerations for investors. Ensure the summary is engaging and suitable for audiences on platforms like LinkedIn, Facebook, X (formerly Twitter), and Threads.",
+  short_summary_prompt:
+    "Write a short post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+  video_script_prompt:
+    "Write a short video script in 5 to 7 sentences based on this summary. The script should flow as a single paragraph, sound natural and engaging, and be directly related to the topic. Avoid hashtags, emojis, quotation marks, or informal language. Return only the script as a single paragraph with no extra text.",
+  make_image_prompt:
+    "Create a professional, minimalist image for a financial newsletter brand. The image must have no text, labels, or typography. Use only these colors: #000000, #1683EE, and market-related colors like green and red from stock indicators. The visual should convey clarity, trust, and strategic thinking through abstract shapes, lighting, and layout. Avoid clutter, icons, or annotations. Ensure a modern, clean, and refined style suitable for a LinkedIn audience. Communicate the theme using a visual metaphor only.",
+
+  tiktok_video_title_prompt:
+    "Write a compelling Tiktok video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  tiktok_video_content_prompt:
+    "Write a short Tiktok video post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+
+  threads_title_prompt:
+    "Write a compelling Threads post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  threads_content_prompt:
+    "Write a short Threads post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis. Do not include a title.",
+  threads_video_title_prompt:
+    "Write a compelling Threads video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  threads_video_content_prompt:
+    "Write a short Threads video post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+
+  twitter_title_prompt:
+    "Write a compelling Twitter post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  twitter_content_prompt:
+    "Write a short Twitter post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis. Do not include a title. End the post with this exact URL",
+  twitter_video_title_prompt:
+    "Write a compelling Twitter video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  twitter_video_content_prompt:
+    "Write a short Twitter video post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+
+  instagram_title_prompt:
+    "Write a compelling Instagram post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  instagram_content_prompt:
+    "Write a short Instagram post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis. Do not include a title. End the post with this exact URL",
+  instagram_video_title_prompt:
+    "Write a compelling Instagram video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  instagram_video_content_prompt:
+    "Write a short Instagram video post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+  instagram_reels_title_prompt:
+    "Write a compelling Instagram video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  instagram_reels_content_prompt:
+    "Write a short Instagram reels post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+
+  facebook_title_prompt:
+    "Write a compelling Facebook post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  facebook_content_prompt:
+    "Write a short Facebook post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis. Do not include a title. End the post with this exact URL",
+  facebook_video_title_prompt:
+    "Write a compelling Facebook video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  facebook_video_content_prompt:
+    "Write a short Facebook video post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+  facebook_reels_title_prompt:
+    "Write a compelling Facebook reels post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  facebook_reels_content_prompt:
+    "Write a short Facebook reels post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+
+  linkedin_title_prompt:
+    "Write a compelling LinkedIn post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  linkedin_content_prompt:
+    "Write a short LinkedIn post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis. Do not include a title. End the post with this exact URL.",
+  linkedin_video_title_prompt:
+    "Write a compelling LinkedIn post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  linkedin_video_content_prompt:
+    "Write a short LinkedIn post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+
+  youtube_video_title_prompt:
+    "Write a compelling Youtube video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  youtube_video_content_prompt:
+    "Write a short Youtube video post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+
+  pinterest_title_prompt: "just copy short summary.",
+  pinterest_content_prompt: "just copy short summary.",
+};
+
+/* =========================
    API helper
    ========================= */
 
@@ -132,7 +216,7 @@ function useRouteCustomerId(): number | null {
   const location = useLocation();
 
   const candidates = [
-    params.id,
+    params.id as string | undefined,
     // @ts-ignore allow alternates
     params.customerId,
     // @ts-ignore
@@ -211,31 +295,30 @@ const FIELD_GROUPS: { title: string; items: FieldDef[] }[] = [
         label: "Summary Prompt",
         rows: 3,
         placeholder:
-          "Summarize {{source}} in 120–180 words for {{audience}}. Keep it actionable and positive. End with a question.",
+          "Summarize the following blog post in under 200 words. Maintain a clear, insightful, and friendly tone. Highlight the key differences between ETFs and individual stocks, including their respective advantages and considerations for investors. Ensure the summary is engaging and suitable for audiences on platforms like LinkedIn, Facebook, X (formerly Twitter), and Threads.",
       },
       {
         key: "short_summary_prompt",
         label: "Short Summary Prompt",
         rows: 3,
-        placeholder: "One-sentence TL;DR (<140 chars) with a hook. No hashtags.",
+        placeholder: "Write a short post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
       },
       {
         key: "video_script_prompt",
         label: "Video Script Prompt",
         rows: 3,
         placeholder:
-          "Write a 60s script with hook, 3 beats, CTA. Mention {{brand}}. Conversational. Add b-roll suggestions.",
+          "Write a short video script in 5 to 7 sentences based on this summary. The script should flow as a single paragraph, sound natural and engaging, and be directly related to the topic. Avoid hashtags, emojis, quotation marks, or informal language. Return only the script as a single paragraph with no extra text.",
       },
       {
         key: "make_image_prompt",
         label: "Make Image Prompt",
         rows: 3,
         placeholder:
-          "Generate an image concept describing scene, style, lighting, subject; include brand colors {{colors}}.",
+          "Create a professional, minimalist image for a financial newsletter brand. The image must have no text, labels, or typography. Use only these colors: #000000, #1683EE, and market-related colors like green and red from stock indicators. The visual should convey clarity, trust, and strategic thinking through abstract shapes, lighting, and layout. Avoid clutter, icons, or annotations. Ensure a modern, clean, and refined style suitable for a LinkedIn audience. Communicate the theme using a visual metaphor only.",
       },
     ],
   },
-  // ... (unchanged groups below)
   {
     title: "TikTok",
     items: [
@@ -309,11 +392,29 @@ const FIELD_GROUPS: { title: string; items: FieldDef[] }[] = [
 ];
 
 /* =========================
+   Helpers to apply defaults
+   ========================= */
+
+const ALL_KEYS = Object.keys(DEFAULT_BLOG_PROMPTS) as FieldKey[];
+const isBlank = (v: unknown) => v == null || (typeof v === "string" && v.trim() === "");
+
+function withDefaults(src: Partial<PromptSetting> | null | undefined): Partial<PromptSetting> {
+  const base: Partial<PromptSetting> = { ...DEFAULT_BLOG_PROMPTS };
+  if (!src) return base;
+  const out: Partial<PromptSetting> = { ...base };
+  for (const k of ALL_KEYS) {
+    const val = (src as any)[k];
+    out[k] = isBlank(val) ? (base as any)[k] : val;
+  }
+  return { ...src, ...out };
+}
+
+/* =========================
    Component
    ========================= */
 
 export default function AdminCustomerBlog() {
-  const customerId = useRouteCustomerId(); // ✅ hook instead of async function
+  const customerId = useRouteCustomerId();
   const [record, setRecord] = React.useState<PromptSetting | null>(null);
   const [form, setForm] = React.useState<Partial<PromptSetting>>({});
   const [loading, setLoading] = React.useState(false);
@@ -333,18 +434,28 @@ export default function AdminCustomerBlog() {
       try {
         const data = await PromptSettingAPI.getByCustomerAndContext(customerId, PROMPT_FOR);
         if (!mounted) return;
+
         if (data) {
+          const merged = withDefaults(data);
           setRecord(data);
-          setForm(data);
+          setForm({
+            ...merged,
+            customer_id: customerId,
+            prompt_for: PROMPT_FOR,
+            is_active: (data as any)?.is_active ?? true,
+          });
         } else {
+          // No record yet → start with defaults
+          const merged = withDefaults({ customer_id: customerId, prompt_for: PROMPT_FOR, is_active: true });
           setRecord(null);
-          setForm({ customer_id: customerId, prompt_for: PROMPT_FOR, is_active: true });
+          setForm(merged);
         }
       } catch (e: any) {
         if (!mounted) return;
         setError(e?.message ?? "Failed to load prompt settings");
+        const merged = withDefaults({ customer_id: customerId, prompt_for: PROMPT_FOR, is_active: true });
         setRecord(null);
-        setForm({ customer_id: customerId, prompt_for: PROMPT_FOR, is_active: true });
+        setForm(merged);
       } finally {
         if (!mounted) return;
         setLoading(false);
@@ -371,22 +482,22 @@ export default function AdminCustomerBlog() {
       if (currentId) {
         const { id: _i, customer_id: _c, created_at: _ca, updated_at: _ua, ...rest } = form as any;
         const updated = await PromptSettingAPI.update(Number(currentId), {
-          ...rest,
+          ...withDefaults(rest),
           prompt_for: PROMPT_FOR,
         });
         setRecord(updated);
-        setForm(updated);
+        setForm(withDefaults(updated));
         toast.success("Saved changes.");
       } else {
         const { id: _i, created_at: _ca, updated_at: _ua, ...rest } = form as any;
         const created = await PromptSettingAPI.upsert({
-          ...rest,
+          ...withDefaults(rest),
           customer_id: customerId,
           prompt_for: PROMPT_FOR,
           is_active: (form.is_active ?? true) as boolean,
         });
         setRecord(created);
-        setForm(created);
+        setForm(withDefaults(created));
         toast.success("Created prompt settings.");
       }
     } catch (e: any) {
@@ -398,7 +509,7 @@ export default function AdminCustomerBlog() {
   }
 
   function handleResetToLoaded() {
-    if (record) setForm(record);
+    if (record) setForm(withDefaults(record));
   }
 
   return (

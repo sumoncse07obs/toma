@@ -3,6 +3,9 @@ import React from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { toast } from "react-toastify";
 
+/* =========================
+   Types
+   ========================= */
 type PromptFor = "launch";
 
 export type PromptSetting = {
@@ -59,9 +62,96 @@ export type PromptSetting = {
 };
 
 /* =========================
+   Defaults (from your SQL dump)
+   ========================= */
+const DEFAULT_LAUNCH_PROMPTS: Partial<PromptSetting> = {
+  summary_prompt:
+    "Summarize the following blog post in under 200 words. Maintain a clear, insightful, and friendly tone. Highlight the key differences between ETFs and individual stocks, including their respective advantages and considerations for investors. Ensure the summary is engaging and suitable for audiences on platforms like LinkedIn, Facebook, X (formerly Twitter), and Threads.",
+  short_summary_prompt:
+    "Write a short post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+  video_script_prompt:
+    "Write a short video script in 5 to 7 sentences based on this summary. The script should flow as a single paragraph, sound natural and engaging, and be directly related to the topic. Avoid hashtags, emojis, quotation marks, or informal language. Return only the script as a single paragraph with no extra text.",
+  make_image_prompt:
+    "Create a professional, minimalist image for a financial newsletter brand. The image must have no text, labels, or typography. Use only these colors: #000000, #1683EE, and market-related colors like green and red from stock indicators. The visual should convey clarity, trust, and strategic thinking through abstract shapes, lighting, and layout. Avoid clutter, icons, or annotations. Ensure a modern, clean, and refined style suitable for a LinkedIn audience. Communicate the theme using a visual metaphor only.",
+
+  // TikTok
+  tiktok_video_title_prompt:
+    "Write a compelling Tiktok video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  tiktok_video_content_prompt:
+    "copy exact same content as the content is. i mean what ever i put in the Launch_content",
+
+  // Threads
+  threads_title_prompt:
+    "Write a compelling Threads post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  threads_content_prompt:
+    "copy exact same content as the content is. i mean what ever i put in the Launch_content",
+  threads_video_title_prompt:
+    "Write a compelling Threads video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  threads_video_content_prompt:
+    "copy exact same content as the content is. i mean what ever i put in the Launch_content",
+
+  // Twitter / X
+  twitter_title_prompt:
+    "Write a compelling Twitter post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  twitter_content_prompt:
+    "copy exact same content as the content is. i mean what ever i put in the Launch_content",
+  twitter_video_title_prompt:
+    "Write a compelling Twitter video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  twitter_video_content_prompt:
+    "copy exact same content as the content is. i mean what ever i put in the Launch_content",
+
+  // Instagram
+  instagram_title_prompt:
+    "Write a compelling Instagram post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  instagram_content_prompt:
+    "copy exact same content as the content is. i mean what ever i put in the Launch_content",
+  instagram_video_title_prompt:
+    "Write a compelling Instagram video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  instagram_video_content_prompt:
+    "copy exact same content as the content is. i mean what ever i put in the Launch_content",
+  instagram_reels_title_prompt:
+    "Write a compelling Instagram video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  instagram_reels_content_prompt:
+    "copy exact same content as the content is. i mean what ever i put in the Launch_content",
+
+  // Facebook
+  facebook_title_prompt:
+    "Write a compelling Facebook post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  facebook_content_prompt:
+    "copy exact same content as the content is. i mean what ever i put in the Launch_content",
+  facebook_video_title_prompt:
+    "Write a compelling Facebook video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  facebook_video_content_prompt:
+    "copy exact same content as the content is. i mean what ever i put in the Launch_content",
+  facebook_reels_title_prompt:
+    "Write a compelling Facebook reels post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  facebook_reels_content_prompt:
+    "Write a short Facebook reels post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+
+  // LinkedIn
+  linkedin_title_prompt:
+    "Write a compelling LinkedIn post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  linkedin_content_prompt:
+    "copy exact same content as the content is. i mean what ever i put in the Launch_content",
+  linkedin_video_title_prompt:
+    "Write a compelling LinkedIn post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  linkedin_video_content_prompt:
+    "Write a short LinkedIn post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+
+  // YouTube
+  youtube_video_title_prompt:
+    "Write a compelling Youtube video post title in 70 characters or fewer based on this blog summary. The title should be smart, professional, and relevant to business professionals. Avoid hashtags, emojis, quotation marks, or informal language. Return only the title with no extra text.",
+  youtube_video_content_prompt:
+    "Write a short Youtube video post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
+
+  // Pinterest
+  pinterest_title_prompt: "just copy short summary",
+  pinterest_content_prompt: "just copy short summary.",
+};
+
+/* =========================
    API helper
    ========================= */
-
 const API_BASE = `${import.meta.env.VITE_API_BASE}/api`;
 const TOKEN_KEY = "toma_token";
 const PROMPT_FOR: PromptFor = "launch";
@@ -69,7 +159,6 @@ const PROMPT_FOR: PromptFor = "launch";
 function norm(path: string) {
   return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`.replace(/([^:]\/)\/+/g, "$1");
 }
-
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem(TOKEN_KEY);
   const res = await fetch(norm(path), {
@@ -93,18 +182,15 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const ct = res.headers.get("content-type") || "";
   return (ct.includes("application/json") ? await res.json() : (undefined as any)) as T;
 }
-
 const unwrap = <T,>(res: any): T => (res?.data ?? res) as T;
 
 const PromptSettingAPI = {
-  // GET /prompt-setting?customer_id=&prompt_for=
   async getByCustomerAndContext(customerId: number, promptFor: PromptFor) {
     const res = await api<any>(
       `/prompt-setting?customer_id=${customerId}&prompt_for=${encodeURIComponent(promptFor)}`
     );
     return unwrap<PromptSetting | null>(res);
   },
-  // POST /prompt-setting (upsert by customer_id + prompt_for)
   async upsert(payload: Omit<PromptSetting, "id" | "created_at" | "updated_at">) {
     const res = await api<any>(`/prompt-setting`, {
       method: "POST",
@@ -112,7 +198,6 @@ const PromptSettingAPI = {
     });
     return unwrap<PromptSetting>(res);
   },
-  // PUT /prompt-setting/{id}
   async update(id: number, payload: Partial<PromptSetting>) {
     const { id: _i, customer_id: _c, created_at: _ca, updated_at: _ua, ...rest } = payload as any;
     const res = await api<any>(`/prompt-setting/${id}`, {
@@ -124,16 +209,15 @@ const PromptSettingAPI = {
 };
 
 /* =========================
-   Route customer id (custom hook)
+   Route customer id helper
    ========================= */
-
 function useRouteCustomerId(): number | null {
   const params = useParams();
   const location = useLocation();
 
   const candidates = [
     params.id,
-    // @ts-ignore allow alternates
+    // @ts-ignore
     params.customerId,
     // @ts-ignore
     params.cid,
@@ -155,7 +239,6 @@ function useRouteCustomerId(): number | null {
 /* =========================
    UI primitives
    ========================= */
-
 function Button(
   props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "ghost" | "danger" }
 ) {
@@ -195,7 +278,6 @@ function Textarea(
 /* =========================
    Field Groups
    ========================= */
-
 type FieldKey = keyof Omit<
   PromptSetting,
   "id" | "customer_id" | "prompt_for" | "created_at" | "updated_at" | "is_active"
@@ -211,59 +293,50 @@ const FIELD_GROUPS: { title: string; items: FieldDef[] }[] = [
         label: "Summary Prompt",
         rows: 3,
         placeholder:
-          "Summarize {{source}} in 120–180 words for {{audience}}. Keep it actionable and positive. End with a question.",
+          "Summarize the following blog post in under 200 words. Maintain a clear, insightful, and friendly tone. Highlight the key differences between ETFs and individual stocks, including their respective advantages and considerations for investors. Ensure the summary is engaging and suitable for audiences on platforms like LinkedIn, Facebook, X (formerly Twitter), and Threads.",
       },
       {
         key: "short_summary_prompt",
         label: "Short Summary Prompt",
         rows: 3,
-        placeholder: "One-sentence TL;DR (<140 chars) with a hook. No hashtags.",
+        placeholder: "Write a short post (max 250 characters) based on this blog summary. The tone should be professional yet conversational—sounding human, not overly polished. Avoid hashtags and emojis.",
       },
       {
         key: "video_script_prompt",
         label: "Video Script Prompt",
         rows: 3,
         placeholder:
-          "Write a 60s script with hook, 3 beats, CTA. Mention {{brand}}. Conversational. Add b-roll suggestions.",
+          "Write a short video script in 5 to 7 sentences based on this summary. The script should flow as a single paragraph, sound natural and engaging, and be directly related to the topic. Avoid hashtags, emojis, quotation marks, or informal language. Return only the script as a single paragraph with no extra text.",
       },
       {
         key: "make_image_prompt",
         label: "Make Image Prompt",
         rows: 3,
         placeholder:
-          "Generate an image concept describing scene, style, lighting, subject; include brand colors {{colors}}.",
+          "Create a professional, minimalist image for a financial newsletter brand. The image must have no text, labels, or typography. Use only these colors: #000000, #1683EE, and market-related colors like green and red from stock indicators. The visual should convey clarity, trust, and strategic thinking through abstract shapes, lighting, and layout. Avoid clutter, icons, or annotations. Ensure a modern, clean, and refined style suitable for a LinkedIn audience. Communicate the theme using a visual metaphor only.",
       },
     ],
   },
-  // ... (unchanged groups below)
-  {
-    title: "TikTok",
-    items: [
+  { title: "TikTok", items: [
       { key: "tiktok_video_title_prompt", label: "TikTok Video Title", rows: 3 },
       { key: "tiktok_video_content_prompt", label: "TikTok Video Content", rows: 3 },
     ],
   },
-  {
-    title: "Threads",
-    items: [
+  { title: "Threads", items: [
       { key: "threads_title_prompt", label: "Threads Title", rows: 3 },
       { key: "threads_content_prompt", label: "Threads Content", rows: 3 },
       { key: "threads_video_title_prompt", label: "Threads Video Title", rows: 3 },
       { key: "threads_video_content_prompt", label: "Threads Video Content", rows: 3 },
     ],
   },
-  {
-    title: "Twitter / X",
-    items: [
+  { title: "Twitter / X", items: [
       { key: "twitter_title_prompt", label: "X Title", rows: 3 },
       { key: "twitter_content_prompt", label: "X Content", rows: 3 },
       { key: "twitter_video_title_prompt", label: "X Video Title", rows: 3 },
       { key: "twitter_video_content_prompt", label: "X Video Content", rows: 3 },
     ],
   },
-  {
-    title: "Instagram",
-    items: [
+  { title: "Instagram", items: [
       { key: "instagram_title_prompt", label: "Instagram Title", rows: 3 },
       { key: "instagram_content_prompt", label: "Instagram Content", rows: 3 },
       { key: "instagram_video_title_prompt", label: "Instagram Video Title", rows: 3 },
@@ -272,9 +345,7 @@ const FIELD_GROUPS: { title: string; items: FieldDef[] }[] = [
       { key: "instagram_reels_content_prompt", label: "Reels Content", rows: 3 },
     ],
   },
-  {
-    title: "Facebook",
-    items: [
+  { title: "Facebook", items: [
       { key: "facebook_title_prompt", label: "Facebook Title", rows: 3 },
       { key: "facebook_content_prompt", label: "Facebook Content", rows: 3 },
       { key: "facebook_video_title_prompt", label: "Facebook Video Title", rows: 3 },
@@ -283,25 +354,19 @@ const FIELD_GROUPS: { title: string; items: FieldDef[] }[] = [
       { key: "facebook_reels_content_prompt", label: "Facebook Reels Content", rows: 3 },
     ],
   },
-  {
-    title: "LinkedIn",
-    items: [
+  { title: "LinkedIn", items: [
       { key: "linkedin_title_prompt", label: "LinkedIn Title", rows: 3 },
       { key: "linkedin_content_prompt", label: "LinkedIn Content", rows: 3 },
       { key: "linkedin_video_title_prompt", label: "LinkedIn Video Title", rows: 3 },
       { key: "linkedin_video_content_prompt", label: "LinkedIn Video Content", rows: 3 },
     ],
   },
-  {
-    title: "YouTube",
-    items: [
+  { title: "YouTube", items: [
       { key: "youtube_video_title_prompt", label: "YouTube Video Title", rows: 3 },
       { key: "youtube_video_content_prompt", label: "YouTube Video Description", rows: 3 },
     ],
   },
-  {
-    title: "Pinterest",
-    items: [
+  { title: "Pinterest", items: [
       { key: "pinterest_title_prompt", label: "Pinterest Title", rows: 3 },
       { key: "pinterest_content_prompt", label: "Pinterest Description", rows: 3 },
     ],
@@ -311,16 +376,27 @@ const FIELD_GROUPS: { title: string; items: FieldDef[] }[] = [
 /* =========================
    Component
    ========================= */
-
 export default function AdminCustomerLaunch() {
-  const customerId = useRouteCustomerId(); // ✅ hook instead of async function
+  const customerId = useRouteCustomerId();
   const [record, setRecord] = React.useState<PromptSetting | null>(null);
   const [form, setForm] = React.useState<Partial<PromptSetting>>({});
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // load setting for {customer_id, prompt_for: launch}
+  // Merge helper: fill blanks with defaults (non-destructive)
+  function mergeWithDefaults(partial: Partial<PromptSetting>): Partial<PromptSetting> {
+    const merged: Partial<PromptSetting> = { ...DEFAULT_LAUNCH_PROMPTS, ...partial };
+    // If any field is an empty string, replace with default too
+    for (const k of Object.keys(DEFAULT_LAUNCH_PROMPTS) as (keyof PromptSetting)[]) {
+      const v = (partial as any)[k];
+      if (v === "" || v === null || typeof v === "undefined") {
+        (merged as any)[k] = (DEFAULT_LAUNCH_PROMPTS as any)[k] ?? "";
+      }
+    }
+    return merged;
+  }
+
   React.useEffect(() => {
     if (!customerId) {
       setError("Could not determine your company. Please sign in again.");
@@ -334,17 +410,32 @@ export default function AdminCustomerLaunch() {
         const data = await PromptSettingAPI.getByCustomerAndContext(customerId, PROMPT_FOR);
         if (!mounted) return;
         if (data) {
+          // Existing record → fill blanks with defaults (do NOT overwrite filled fields)
+          const withDefaults = mergeWithDefaults(data);
           setRecord(data);
-          setForm(data);
+          setForm(withDefaults);
         } else {
+          // No record → start with defaults
+          const seed: Partial<PromptSetting> = {
+            customer_id: customerId,
+            prompt_for: PROMPT_FOR,
+            is_active: true,
+            ...DEFAULT_LAUNCH_PROMPTS,
+          };
           setRecord(null);
-          setForm({ customer_id: customerId, prompt_for: PROMPT_FOR, is_active: true });
+          setForm(seed);
         }
       } catch (e: any) {
         if (!mounted) return;
         setError(e?.message ?? "Failed to load prompt settings");
+        const seed: Partial<PromptSetting> = {
+          customer_id: customerId,
+          prompt_for: PROMPT_FOR,
+          is_active: true,
+          ...DEFAULT_LAUNCH_PROMPTS,
+        };
         setRecord(null);
-        setForm({ customer_id: customerId, prompt_for: PROMPT_FOR, is_active: true });
+        setForm(seed);
       } finally {
         if (!mounted) return;
         setLoading(false);
@@ -355,7 +446,12 @@ export default function AdminCustomerLaunch() {
     };
   }, [customerId]);
 
-  function updateField<K extends FieldKey>(key: K, value: string) {
+  type K = keyof Omit<
+    PromptSetting,
+    "id" | "customer_id" | "prompt_for" | "created_at" | "updated_at" | "is_active"
+  >;
+
+  function updateField(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -371,22 +467,23 @@ export default function AdminCustomerLaunch() {
       if (currentId) {
         const { id: _i, customer_id: _c, created_at: _ca, updated_at: _ua, ...rest } = form as any;
         const updated = await PromptSettingAPI.update(Number(currentId), {
-          ...rest,
+          ...mergeWithDefaults(rest),
           prompt_for: PROMPT_FOR,
         });
         setRecord(updated);
-        setForm(updated);
+        // Ensure the UI continues to show defaults for any blanks
+        setForm(mergeWithDefaults(updated));
         toast.success("Saved changes.");
       } else {
         const { id: _i, created_at: _ca, updated_at: _ua, ...rest } = form as any;
         const created = await PromptSettingAPI.upsert({
-          ...rest,
+          ...mergeWithDefaults(rest),
           customer_id: customerId,
           prompt_for: PROMPT_FOR,
           is_active: (form.is_active ?? true) as boolean,
         });
         setRecord(created);
-        setForm(created);
+        setForm(mergeWithDefaults(created));
         toast.success("Created prompt settings.");
       }
     } catch (e: any) {
@@ -398,7 +495,16 @@ export default function AdminCustomerLaunch() {
   }
 
   function handleResetToLoaded() {
-    if (record) setForm(record);
+    if (record) {
+      setForm(mergeWithDefaults(record));
+    } else {
+      setForm({
+        customer_id: customerId || 0,
+        prompt_for: PROMPT_FOR,
+        is_active: true,
+        ...DEFAULT_LAUNCH_PROMPTS,
+      });
+    }
   }
 
   return (
@@ -412,7 +518,7 @@ export default function AdminCustomerLaunch() {
             </p>
           </div>
           <div className="flex items-end gap-2">
-            <Button variant="ghost" onClick={handleResetToLoaded} disabled={!record}>
+            <Button variant="ghost" onClick={handleResetToLoaded}>
               Reset
             </Button>
             <Button onClick={handleSave} disabled={!customerId || saving}>
