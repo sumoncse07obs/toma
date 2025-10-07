@@ -63,34 +63,17 @@ type ContentGeneration = {
   pinterest_description?: string | null;
 };
 
-type CustomerSettings = {
-  facebook_profile_id?: string | null;
-  facebook_page_ids?: string[] | string | null;
-  instagram_account_id?: string | null;
-  x_account_id?: string | null;
-  twitter_account_id?: string | null;
-  threads_account_id?: string | null;
-  tiktok_account_id?: string | null;
-  youtube_channel_id?: string | null;
-  linkedin_personal_id?: string | null;
-  linkedin_page_ids?: string[] | string | null;
-};
-
-type SocialConnection = {
-  id: number | string;
-  provider: string;
-  kind?: string | null;
-  meta?: any;
-};
-
 /* ========================= API base (robust) ========================= */
 const RAW_BASE = String(import.meta.env.VITE_API_BASE || "").replace(/\/+$/g, "");
 const API_BASE = RAW_BASE.endsWith("/api") ? RAW_BASE : `${RAW_BASE}/api`;
 const TOKEN_KEY = "toma_token";
 
+/** normalize URL and keep one slash */
 function norm(path: string) {
   return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`.replace(/([^:]\/)\/+/g, "$1");
 }
+
+/** token-based API helper (no cookies/credentials) */
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem(TOKEN_KEY);
   const res = await fetch(norm(path), {
@@ -106,28 +89,32 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const text = await res.text().catch(() => "");
     let msg = text || res.statusText || "Request failed";
     try {
-      msg = JSON.parse(text)?.message || msg;
+      const j = JSON.parse(text);
+      msg = j?.message || msg;
     } catch {}
     throw new Error(`HTTP ${res.status}: ${msg}`);
   }
   const ct = res.headers.get("content-type") || "";
   return (ct.includes("application/json") ? await res.json() : (undefined as any)) as T;
 }
+
 function getCustomerIdFromAuth(): number {
   const u: any = currentUser?.() ?? null;
   return u?.customer_id ?? u?.customer?.id ?? u?.profile?.customer_id ?? u?.company?.customer_id ?? 1;
 }
 
-/* ===================== Status helpers ===================== */
+/* ===================== Status normalization + polling helpers ===================== */
 function normalizeStatus(s: string | null | undefined): "queued" | "posted" | "failed" {
   const v = String(s || "").toLowerCase();
   if (["success", "published", "complete", "completed", "posted"].includes(v)) return "posted";
   if (["fail", "failed", "error"].includes(v)) return "failed";
   return "queued";
 }
-const BASE_POLL_MS = 4000;
-const MAX_POLL_MS  = 20000;
-const MAX_TOTAL_MS = 10 * 60 * 1000;
+
+const BASE_POLL_MS = 4000;      // start at 4s
+const MAX_POLL_MS  = 20000;     // cap at 20s
+const MAX_TOTAL_MS = 10 * 60 * 1000; // give up after 10 min
+
 function nextDelay(prev: number) {
   const n = Math.min(Math.round(prev * 1.6), MAX_POLL_MS);
   const jitter = Math.floor(Math.random() * 500);
@@ -136,6 +123,7 @@ function nextDelay(prev: number) {
 
 /* =============================== Field map =============================== */
 type FieldKeys = { title?: keyof ContentGeneration; content?: keyof ContentGeneration };
+
 const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: FieldKeys }> = {
   Facebook: {
     text:  { title: "facebook_title",         content: "facebook_content" },
@@ -208,12 +196,20 @@ function roundToNext5Min(d = new Date()) {
 }
 function toLocalInputValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const h = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  return `${y}-${m}-${day}T${h}:${min}`;
 }
 function localInputToISO(v: string) {
+  // Treat the value as local time, then convert to ISO (UTC)
   const dt = new Date(v.replace(" ", "T"));
   return isNaN(dt.getTime()) ? null : dt.toISOString();
 }
+
+// ---- UTC clock helpers (seconds precision, no milliseconds) ----
 function nowUtcIsoSeconds() {
   const d = new Date();
   const yyyy = d.getUTCFullYear();
@@ -225,118 +221,13 @@ function nowUtcIsoSeconds() {
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}Z`;
 }
 
-/* ============================ settings helpers ============================ */
-function toList(v?: string[] | string | null): string[] {
-  if (!v) return [];
-  if (Array.isArray(v)) return v.filter(Boolean);
-  const s = String(v).trim();
-  if (!s) return [];
-  try {
-    const parsed = JSON.parse(s);
-    if (Array.isArray(parsed)) return parsed.filter(Boolean).map(String);
-  } catch {}
-  return s.split(",").map((x) => x.trim()).filter(Boolean);
-}
-
-function computeFromConnections(conns: SocialConnection[] | null | undefined) {
-  const map = {
-    Facebook: false,
-    Instagram: false,
-    Threads: false,
-    "Twitter/X": false,
-    Reals: false,
-    "Tick Tok": false,
-    "Linkedin Business": false,
-    "Linkedin Personal": false,
-    "YouTube Short": false,
-  };
-  if (!conns?.length) return map;
-
-  let hasFb = false;
-  let hasFbPage = false;
-  let hasIg = false;
-
-  for (const c of conns) {
-    const p = (c.provider || "").toLowerCase();
-    if (p.includes("facebook_page")) hasFbPage = true;
-    if (p === "facebook" || p.includes("meta_facebook")) hasFb = true;
-
-    if (p.includes("instagram")) hasIg = true;
-    if (p === "threads") map["Threads"] = true;
-
-    if (p === "x" || p === "twitter") map["Twitter/X"] = true;
-    if (p === "tiktok") map["Tick Tok"] = true;
-    if (p.startsWith("youtube")) map["YouTube Short"] = true;
-
-    if (p.includes("linkedin_page")) map["Linkedin Business"] = true;
-    if (p.includes("linkedin_personal") || p === "linkedin") map["Linkedin Personal"] = true;
-  }
-
-  map["Facebook"] = hasFb || hasFbPage;
-  map["Instagram"] = hasIg;
-  map["Reals"] = hasFbPage || hasIg;
-
-  return map;
-}
-
-function computeFromSettings(s: CustomerSettings | null) {
-  const fbPages = toList(s?.facebook_page_ids);
-  const hasFacebookAny = !!(s?.facebook_profile_id || fbPages.length > 0);
-  const hasFacebookPages = fbPages.length > 0;
-
-  const hasInstagram   = !!s?.instagram_account_id;
-  const hasX           = !!(s?.x_account_id || s?.twitter_account_id);
-  const hasThreads     = !!s?.threads_account_id;
-  const hasTikTok      = !!s?.tiktok_account_id;
-  const hasYouTube     = !!s?.youtube_channel_id;
-  const liPages        = toList(s?.linkedin_page_ids);
-  const hasLiBusiness  = liPages.length > 0;
-  const hasLiPersonal  = !!s?.linkedin_personal_id;
-
-  return {
-    Facebook: hasFacebookAny,
-    Instagram: hasInstagram,
-    Threads: hasThreads,
-    "Twitter/X": hasX,
-    Reals: hasFacebookPages || hasInstagram,
-    "Tick Tok": hasTikTok,
-    "Linkedin Business": hasLiBusiness,
-    "Linkedin Personal": hasLiPersonal,
-    "YouTube Short": hasYouTube,
-  };
-}
-
-function computeEnabledPlatforms(
-  loaded: boolean,
-  connMap: ReturnType<typeof computeFromConnections>,
-  setMap: ReturnType<typeof computeFromSettings>
-) {
-  if (!loaded) {
-    return {
-      Facebook: true,
-      Instagram: true,
-      Threads: true,
-      "Twitter/X": true,
-      Reals: true,
-      "Tick Tok": true,
-      "Linkedin Business": true,
-      "Linkedin Personal": true,
-      "YouTube Short": true,
-    };
-  }
-  const out: any = {};
-  for (const k of Object.keys(setMap) as (keyof typeof setMap)[]) {
-    out[k] = Boolean((connMap as any)[k] || (setMap as any)[k]);
-  }
-  return out as typeof setMap;
-}
-
 /* =============================== Component =============================== */
 export default function PublishPost() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
+  // ------- derive dynamic context (blog | youtube | topic | launch) -------
   const context = useMemo<"blog" | "youtube" | "topic" | "launch">(() => {
     const p = pathname.toLowerCase();
     if (p.includes("/customer/youtube/") || p.includes("/youtube/")) return "youtube";
@@ -345,7 +236,7 @@ export default function PublishPost() {
     return "blog";
   }, [pathname]);
 
-  const TITLE_BY_CONTEXT: Record<"blog" | "youtube" | "topic" | "launch", string> = {
+  const TITLE_BY_CONTEXT: Record<typeof context, string> = {
     blog: "Toma Blog Automation",
     youtube: "Toma YouTube Automation",
     topic: "Toma Topic Automation",
@@ -373,31 +264,21 @@ export default function PublishPost() {
   const [approveStatus, setApproveStatus] = useState<"idle" | "posting" | "posted" | "error">("idle");
   const [approveError, setApproveError] = useState<string | null>(null);
 
+  // publish tracking
   const [lastSubmissionId, setLastSubmissionId] = useState<string | null>(null);
   const [lastPublishLogId, setLastPublishLogId] = useState<number | null>(null);
   const [publishStatus, setPublishStatus] = useState<"idle" | "queued" | "posted" | "failed">("idle");
   const [postedOnIso, setPostedOnIso] = useState<string | null>(null);
   const [publicUrl, setPublicUrl] = useState<string | null>(null);
 
+  // UI: overlay while waiting for final status (disabled per your note)
   const showStatusOverlay = false;
 
+  // debug heartbeat
   const [lastCheckAt, setLastCheckAt] = useState<number | null>(null);
   const [lastStatusRaw, setLastStatusRaw] = useState<string | null>(null);
   const [nextPollInMs, setNextPollInMs] = useState<number | null>(null);
   const [latestLogPollMs, setLatestLogPollMs] = useState<number>(5000);
-
-  // Settings & connections
-  const [settings, setSettings] = useState<CustomerSettings | null>(null);
-  const [connections, setConnections] = useState<SocialConnection[] | null>(null);
-  const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [settingsLoading, setSettingsLoading] = useState<boolean>(true);
-
-  const setMap = useMemo(() => computeFromSettings(settings), [settings]);
-  const connMap = useMemo(() => computeFromConnections(connections), [connections]);
-  const enabledMap = useMemo(
-    () => computeEnabledPlatforms(!settingsLoading, connMap, setMap),
-    [settingsLoading, connMap, setMap]
-  );
 
   const customerId = useMemo(() => getCustomerIdFromAuth(), []);
   const platforms = Object.keys(FIELD_MAP);
@@ -408,6 +289,7 @@ export default function PublishPost() {
   );
   const effectivePostType: PostType = selectedPlatform === "Reals" ? "video" : postType;
 
+  // ====== dynamic links (Back / Logs) ======
   const contentId = record?.id ?? (id ? parseInt(id, 10) : null);
   const backUrl = useMemo(
     () => (contentId != null ? `/customer/${context}/view/${contentId}` : "/customer"),
@@ -418,11 +300,15 @@ export default function PublishPost() {
     [context, contentId]
   );
 
+  // ====== Scheduling modal state ======
   const [showSchedule, setShowSchedule] = useState(false);
   const [scheduledAtLocal, setScheduledAtLocal] = useState<string>("");
   const [scheduleErr, setScheduleErr] = useState<string | null>(null);
 
+  // ====== UTC clock state (for modal) ======
   const [nowUtcIso, setNowUtcIso] = useState<string>(nowUtcIsoSeconds());
+
+  // Tick UTC clock while modal is open
   useEffect(() => {
     if (!showSchedule) return;
     setNowUtcIso(nowUtcIsoSeconds());
@@ -446,6 +332,7 @@ export default function PublishPost() {
         const allowed = allowedPostTypes("Facebook");
         setPostType(allowed.includes(initial) ? initial : allowed[0]);
 
+        // Default schedule time ~10 minutes from now (rounded)
         const def = roundToNext5Min(new Date(Date.now() + 10 * 60 * 1000));
         setScheduledAtLocal(toLocalInputValue(def));
       } catch (e: any) {
@@ -457,46 +344,6 @@ export default function PublishPost() {
     if (id) load();
     return () => { cancelled = true; };
   }, [id]);
-
-  /* ------------------------ load settings + connections ------------------------ */
-  useEffect(() => {
-    let cancelled = false;
-    async function loadAll() {
-      setSettingsLoading(true);
-      setSettingsError(null);
-      try {
-        // ✅ EXACTLY how you call it: /settings?customer_id=#
-        const [s, c] = await Promise.allSettled([
-          api<any>(`/settings?customer_id=${encodeURIComponent(customerId)}`),
-        ]);
-        if (!cancelled) {
-          if (s.status === "fulfilled") setSettings(s.value?.data ?? s.value ?? null);
-          if (c.status === "fulfilled") setConnections(c.value?.data ?? c.value ?? null);
-        }
-      } catch (e: any) {
-        if (!cancelled) setSettingsError(e?.message || "Failed to load settings");
-      } finally {
-        if (!cancelled) setSettingsLoading(false);
-      }
-    }
-    loadAll();
-    return () => { cancelled = true; };
-  }, [customerId]);
-
-  // After settings load, if current platform is disabled, jump to first enabled
-  useEffect(() => {
-    if (settingsLoading) return;
-    const enabledPlatforms = Object.entries(enabledMap).filter(([, v]) => v).map(([k]) => k);
-    if (!enabledPlatforms.length) return;
-    if (!enabledMap[selectedPlatform]) {
-      setSelectedPlatform(enabledPlatforms[0]);
-      if (enabledPlatforms[0] === "Reals") {
-        const fbOk = connMap["Facebook"] && (connections || []).some(c => (c.provider||"").toLowerCase().includes("facebook_page"));
-        const igOk = connMap["Instagram"];
-        setReelsPlatform(fbOk ? "facebook" : igOk ? "instagram" : "facebook");
-      }
-    }
-  }, [enabledMap, settingsLoading, selectedPlatform, connMap, connections]);
 
   /* -------------------------- persist video_url -------------------------- */
   async function persistVideoUrl(url: string) {
@@ -521,7 +368,7 @@ export default function PublishPost() {
   useEffect(() => {
     if (!record?.id) return;
     const trimmed = (videoUrl ?? "").trim();
-    if (!trimmed || trimmed === (record?.video_url ?? "").trim()) return;
+    if (!trimmed || trimmed === (record.video_url ?? "").trim()) return;
     const t = setTimeout(() => { void persistVideoUrl(trimmed); }, 700);
     return () => clearTimeout(t);
   }, [videoUrl, record?.id, record?.video_url]);
@@ -547,10 +394,7 @@ export default function PublishPost() {
 
   const pickPlatform = (p: string) => {
     setSelectedPlatform(p);
-    if (p === "Reals") {
-      const hasFbPage = (connections || []).some(c => (c.provider||"").toLowerCase().includes("facebook_page"));
-      setReelsPlatform(hasFbPage ? "facebook" : "instagram");
-    }
+    if (p === "Reals") setReelsPlatform("facebook");
     const allowed = allowedPostTypes(p);
     setPostType((prev) => (allowed.includes(prev) ? prev : allowed[0]));
   };
@@ -566,9 +410,10 @@ export default function PublishPost() {
     };
   }, [postType, selectedPlatform, record?.image_url, record?.video_url, videoUrl]);
 
-  /* -------------- latest log -------------- */
+  /* -------------- load latest log (uses final_status/publicUrl) -------------- */
   useEffect(() => {
     if (!record?.id) return;
+
     const loadLatest = async () => {
       try {
         const params = new URLSearchParams({
@@ -580,12 +425,15 @@ export default function PublishPost() {
         const log = js?.data;
 
         if (!log) {
-          setPublishStatus("idle"); setPostedOnIso(null); setPublicUrl(null);
-          setLastSubmissionId(null); setLastPublishLogId(null);
+          setPublishStatus("idle");
+          setPostedOnIso(null);
+          setPublicUrl(null);
+          setLastSubmissionId(null);
+          setLastPublishLogId(null);
           return;
         }
 
-        const finalStatus = String(log.final_status || "").toLowerCase();
+        const finalStatus = String(log.final_status || "").toLowerCase(); // 'published' | 'failed' | ''
         if (finalStatus === "published") {
           setPublishStatus("posted");
           setPublicUrl(log.publicUrl ?? null);
@@ -603,12 +451,15 @@ export default function PublishPost() {
         const subId: string | null = log.provider_post_id ?? null;
         setLastSubmissionId(subId);
         setLastPublishLogId(log.id ?? null);
-      } catch {/* ignore */}
+      } catch {
+        // silent
+      }
     };
+
     void loadLatest();
   }, [record?.id, platformKey, effectivePostType]);
 
-  /* ---- poll latest until submission id appears ---- */
+  /* ---- If we don't have provider_post_id yet, keep polling latestLog ---- */
   useEffect(() => {
     if (!record?.id) return;
     if (lastSubmissionId) return;
@@ -654,6 +505,7 @@ export default function PublishPost() {
           const subId: string | null = log.provider_post_id ?? null;
           if (subId) {
             setLastSubmissionId(subId);
+            // kick a first check
             void fetchStatusOnce(subId);
             return;
           }
@@ -665,15 +517,20 @@ export default function PublishPost() {
     }
 
     t = window.setTimeout(pollLatest, latestLogPollMs);
-    return () => { stop = true; if (t) clearTimeout(t); };
+    return () => {
+      stop = true;
+      if (t) clearTimeout(t);
+    };
   }, [record?.id, lastSubmissionId, publishStatus, platformKey, effectivePostType, latestLogPollMs]);
 
+  /* ------------------ one-shot status fetch (updates UI) ------------------ */
   async function fetchStatusOnce(subId: string) {
     try {
       const js = await api<any>(`/publish/status/${subId}`);
       setLastCheckAt(Date.now());
       setLastStatusRaw(String(js?.status ?? ""));
       const uiStatus = normalizeStatus(js?.status);
+
       if (uiStatus === "posted") {
         setPublishStatus("posted");
         setPublicUrl(js?.publicUrl || null);
@@ -688,6 +545,7 @@ export default function PublishPost() {
     }
   }
 
+  /* --------------- Adaptive polling against /publish/status --------------- */
   useEffect(() => {
     if (!lastSubmissionId) return;
     if (publishStatus === "posted" || publishStatus === "failed") return;
@@ -699,7 +557,9 @@ export default function PublishPost() {
     const controller = new AbortController();
 
     function shouldPollNow() {
-      return typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+      return typeof document !== "undefined"
+        ? document.visibilityState === "visible"
+        : true;
     }
 
     async function pollOnce(): Promise<boolean> {
@@ -721,6 +581,7 @@ export default function PublishPost() {
           setNextPollInMs(null);
           return true;
         }
+
         setPublishStatus("queued");
         return false;
       } catch {
@@ -731,11 +592,13 @@ export default function PublishPost() {
 
     async function loop() {
       if (cancelled) return;
+
       if (!shouldPollNow()) {
         setNextPollInMs(2000);
         timeoutId = window.setTimeout(loop, 2000);
         return;
       }
+
       const done = await pollOnce();
       if (cancelled || done) return;
 
@@ -745,12 +608,14 @@ export default function PublishPost() {
         setNextPollInMs(null);
         return;
       }
+
       delay = nextDelay(delay);
       setNextPollInMs(delay);
       timeoutId = window.setTimeout(loop, delay);
     }
 
     loop();
+
     const visHandler = () => {
       if (document.visibilityState === "visible") {
         if (timeoutId) clearTimeout(timeoutId);
@@ -770,30 +635,15 @@ export default function PublishPost() {
   /* -------------------------- Approve & Publish -------------------------- */
   async function approve(scheduledAtIso?: string) {
     if (!record?.id) return;
-
-    if (!enabledMap[selectedPlatform]) {
-      setApproveStatus("error");
-      setApproveError("This platform is not connected. Connect it in Settings first.");
-      return;
-    }
-    if (selectedPlatform === "Reals") {
-      const hasFbPage = (connections || []).some(c => (c.provider||"").toLowerCase().includes("facebook_page"));
-      const hasIg = connMap["Instagram"];
-      if ((reelsPlatform === "facebook" && !hasFbPage) || (reelsPlatform === "instagram" && !hasIg)) {
-        setApproveStatus("error");
-        setApproveError(`The selected Reels destination (${reelsPlatform}) is not connected.`);
-        return;
-      }
-    }
-
     setApproveStatus("posting");
     setApproveError(null);
 
     let keys: FieldKeys;
     if (selectedPlatform === "Reals") {
-      keys = reelsPlatform === "facebook"
-        ? { title: "facebook_reels_title", content: "facebook_reels_content" }
-        : { title: "instagram_reels_title", content: "instagram_reels_content" };
+      keys =
+        reelsPlatform === "facebook"
+          ? { title: "facebook_reels_title", content: "facebook_reels_content" }
+          : { title: "instagram_reels_title", content: "instagram_reels_content" };
     } else {
       keys = FIELD_MAP[selectedPlatform][postType];
     }
@@ -819,7 +669,7 @@ export default function PublishPost() {
     };
 
     if (scheduledAtIso) {
-      body.scheduled_at = scheduledAtIso;
+      body.scheduled_at = scheduledAtIso; // backend interprets as UTC ISO
     }
 
     try {
@@ -870,17 +720,33 @@ export default function PublishPost() {
   if (loading) return <div className="p-6">Loading post…</div>;
   if (loadError) return <div className="p-6 text-red-600">Failed to load: {loadError}</div>;
 
-  const reelsFbEnabled = (connections || []).some(c => (c.provider||"").toLowerCase().includes("facebook_page"));
-  const reelsIgEnabled = enabledMap["Instagram"];
-
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-8 px-4">
+      {/* ====== Overlay while we wait for final status ====== */}
+      {showStatusOverlay && (
+        <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] flex items-center justify-center">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-80 text-center">
+            <div className="mx-auto mb-3 h-6 w-6 rounded-full border-2 border-gray-300 border-t-transparent animate-spin" />
+            <div className="text-sm text-gray-800 font-medium">
+              Please wait — getting post status from Blotato…
+            </div>
+            <div className="text-[11px] text-gray-500 mt-2">
+              This can take 1–3 minutes for video posts.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
       <h1 className="text-xl font-semibold mb-2">{TITLE_BY_CONTEXT[context]}</h1>
 
+      {/* Back + Refresh */}
       <div className="mb-6 flex items-center gap-3">
         <button
           className="bg-teal-500 text-white px-6 py-2 rounded-md hover:bg-teal-600"
-          onClick={() => { if (contentId != null) navigate(backUrl); }}
+          onClick={() => {
+            if (contentId != null) navigate(backUrl);
+          }}
         >
           Back
         </button>
@@ -890,10 +756,9 @@ export default function PublishPost() {
         >
           Refresh status
         </button>
-        {settingsLoading && <span className="text-xs text-gray-500">Loading connections…</span>}
-        {settingsError && <span className="text-xs text-red-600">Settings error: {settingsError}</span>}
       </div>
 
+      {/* Video URL row */}
       <div className="flex gap-3 items-center w-full max-w-4xl mb-1">
         <label className="text-sm font-medium whitespace-nowrap">Put New Video Url Here</label>
         <input
@@ -911,6 +776,7 @@ export default function PublishPost() {
         />
       </div>
 
+      {/* Save status row */}
       <div className="w-full max-w-4xl mb-6 text-xs min-h-5">
         {savingVideo === "saving" && <span className="text-amber-600">Saving…</span>}
         {savingVideo === "saved" && <span className="text-green-600">Saved</span>}
@@ -919,32 +785,22 @@ export default function PublishPost() {
         )}
       </div>
 
+      {/* Main content */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
         {/* Left: platforms */}
         <div className="space-y-2">
           {platforms.map((p) => {
             const active = p === selectedPlatform;
-            const enabled = enabledMap[p];
             return (
               <button
                 key={p}
-                onClick={() => enabled && setSelectedPlatform(p)}
-                disabled={!enabled}
-                className={`w-full py-2 rounded-md border relative ${
-                  enabled
-                    ? active
-                      ? "bg-blue-100 border-blue-400 text-blue-600 font-medium"
-                      : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
-                    : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
+                onClick={() => pickPlatform(p)}
+                className={`w-full py-2 rounded-md border ${
+                  active ? "bg-blue-100 border-blue-400 text-blue-600 font-medium"
+                         : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
                 }`}
-                title={enabled ? "" : "Connect this platform in Settings to enable"}
               >
                 {p}
-                {!enabled && (
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-400">
-                    Connect in Settings
-                  </span>
-                )}
               </button>
             );
           })}
@@ -967,27 +823,16 @@ export default function PublishPost() {
             placeholder="Post text / description"
           />
 
+          {/* Radios */}
           {selectedPlatform === "Reals" ? (
             <div className="space-y-2">
-              <label className={`flex items-center gap-2 ${reelsFbEnabled ? "" : "opacity-50"}`}>
-                <input
-                  type="radio"
-                  checked={reelsPlatform === "facebook"}
-                  onChange={() => reelsFbEnabled && setReelsPlatform("facebook")}
-                  disabled={!reelsFbEnabled}
-                />
-                Facebook (Reels)
-                {!reelsFbEnabled && <span className="text-[10px] text-gray-400">(connect FB Page)</span>}
+              <label className="flex items-center gap-2">
+                <input type="radio" checked={reelsPlatform === "facebook"} onChange={() => setReelsPlatform("facebook")} />
+                Facebook
               </label>
-              <label className={`flex items-center gap-2 ${reelsIgEnabled ? "" : "opacity-50"}`}>
-                <input
-                  type="radio"
-                  checked={reelsPlatform === "instagram"}
-                  onChange={() => reelsIgEnabled && setReelsPlatform("instagram")}
-                  disabled={!reelsIgEnabled}
-                />
-                Instagram (Reels)
-                {!reelsIgEnabled && <span className="text-[10px] text-gray-400">(connect IG Account)</span>}
+              <label className="flex items-center gap-2">
+                <input type="radio" checked={reelsPlatform === "instagram"} onChange={() => setReelsPlatform("instagram")} />
+                Instagram
               </label>
             </div>
           ) : (
@@ -1017,11 +862,9 @@ export default function PublishPost() {
         {/* Right: actions + STATUS PANEL */}
         <div className="flex flex-col justify-between space-y-4">
           <button
-            className="w-full bg-orange-500 text-white py-2 rounded-md hover:bg-orange-600 disabled:opacity-60"
-            disabled={!enabledMap[selectedPlatform]}
+            className="w-full bg-orange-500 text-white py-2 rounded-md hover:bg-orange-600"
             onClick={() => {
               setScheduleErr(null);
-              if (!enabledMap[selectedPlatform]) return;
               if (!scheduledAtLocal) {
                 const def = roundToNext5Min(new Date(Date.now() + 10 * 60 * 1000));
                 setScheduledAtLocal(toLocalInputValue(def));
@@ -1033,12 +876,9 @@ export default function PublishPost() {
           </button>
 
           <button
-            className={`w-full text-white py-2 rounded-md ${
-              approveStatus === "posting" ? "bg-teal-300" : "bg-teal-500 hover:bg-teal-600"
-            } disabled:opacity-60`}
-            disabled={approveStatus === "posting" || !enabledMap[selectedPlatform]}
+            className={`w-full text-white py-2 rounded-md ${approveStatus === "posting" ? "bg-teal-300" : "bg-teal-500 hover:bg-teal-600"}`}
+            disabled={approveStatus === "posting"}
             onClick={() => void approve()}
-            title={enabledMap[selectedPlatform] ? "" : "Connect this platform in Settings to enable"}
           >
             {approveStatus === "posting" ? "Submitting…" : "Approve & Publish"}
           </button>
@@ -1046,18 +886,15 @@ export default function PublishPost() {
           <div className="rounded-md border border-gray-200 p-3 text-sm bg-gray-50">
             <div className="flex items-center justify-between">
               <span className="text-gray-600">Publish status</span>
-              <span
-                className={`font-medium ${
-                  publishStatus === "posted"
-                    ? "text-green-600"
-                    : publishStatus === "failed"
-                    ? "text-red-600"
-                    : publishStatus === "queued"
-                    ? "text-amber-600"
-                    : "text-gray-500"
-                }`}
-              >
-                {publishStatus === "idle" ? "—" : publishStatus === "queued" ? "Queued" : publishStatus === "posted" ? "Published" : "Failed"}
+              <span className={`font-medium ${
+                publishStatus === "posted" ? "text-green-600" :
+                publishStatus === "failed" ? "text-red-600" :
+                publishStatus === "queued" ? "text-amber-600" : "text-gray-500"
+              }`}>
+                {publishStatus === "idle" ? "—" :
+                 publishStatus === "queued" ? "Queued" :
+                 publishStatus === "posted" ? "Published" :
+                 "Failed"}
               </span>
             </div>
             <div className="flex items-center justify-between mt-1">
@@ -1079,6 +916,7 @@ export default function PublishPost() {
               </div>
             )}
 
+            {/* Heartbeat line so you can see it polling */}
             <div className="text-[11px] text-gray-400 mt-1">
               {lastCheckAt && <>Last check: {new Date(lastCheckAt).toLocaleTimeString()} </>}
               {typeof lastStatusRaw === "string" && lastStatusRaw && <>• raw: {lastStatusRaw} </>}
@@ -1086,7 +924,13 @@ export default function PublishPost() {
               {!lastSubmissionId && <>Waiting for submission id…</>}
             </div>
 
-            <a href={logsUrl} className="text-blue-600 hover:underline">View Publish Logs</a>
+            <a
+              href={logsUrl}
+              className="text-blue-600 hover:underline"
+            >
+              View Publish Logs
+            </a>
+
           </div>
 
           <div className="min-h-5 text-xs">
@@ -1121,36 +965,32 @@ export default function PublishPost() {
             </div>
           </div>
 
-          {(() => {
-            const showVid = previewMedia.showVideo;
-            if (showVid) {
-              return isPlayableVideo(previewMedia.videoUrl) ? (
-                <div className={`rounded-md mb-3 border border-gray-200 overflow-hidden flex items-center justify-center bg-black/5 ${mediaBoxClassBySize[previewSize]}`}>
-                  <video key={previewMedia.videoUrl} src={previewMedia.videoUrl} controls className="w-full h-full object-cover" />
-                </div>
-              ) : (
-                <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
-                  {previewMedia.videoUrl ? "Video URL isn't a direct .mp4/.webm/.mov/.m4v — preview not available" : "No video URL provided"}
-                </div>
-              );
-            }
-            if (previewMedia.showImage) {
-              return previewMedia.imageUrl ? (
-                <div className={`rounded-md mb-3 border border-gray-200 overflow-hidden bg-gray-50 ${mediaBoxClassBySize[previewSize]}`}>
-                  <img src={previewMedia.imageUrl} alt="Post image" className="w-full h-full object-cover" />
-                </div>
-              ) : (
-                <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
-                  No image available
-                </div>
-              );
-            }
-            return null;
-          })()}
+          {previewMedia.showVideo ? (
+            isPlayableVideo(previewMedia.videoUrl) ? (
+              <div className={`rounded-md mb-3 border border-gray-200 overflow-hidden flex items-center justify-center bg-black/5 ${mediaBoxClassBySize[previewSize]}`}>
+                <video key={previewMedia.videoUrl} src={previewMedia.videoUrl} controls className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
+                {previewMedia.videoUrl ? "Video URL isn't a direct .mp4/.webm/.mov/.m4v — preview not available" : "No video URL provided"}
+              </div>
+            )
+          ) : previewMedia.showImage ? (
+            previewMedia.imageUrl ? (
+              <div className={`rounded-md mb-3 border border-gray-200 overflow-hidden bg-gray-50 ${mediaBoxClassBySize[previewSize]}`}>
+                <img src={previewMedia.imageUrl} alt="Post image" className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
+                No image available
+              </div>
+            )
+          ) : null}
 
           <div className="text-base font-medium text-gray-900 whitespace-pre-wrap">
             {title?.trim() ? title : <span className="text-gray-400">Title will appear here…</span>}
           </div>
+
           <div className="mt-2 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
             {description?.trim() ? description : <span className="text-gray-400">Description will appear here…</span>}
           </div>
@@ -1160,15 +1000,41 @@ export default function PublishPost() {
       {/* ====== Schedule Modal ====== */}
       {showSchedule && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowSchedule(false)} />
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowSchedule(false)}
+          />
+          {/* Dialog */}
           <div className="relative z-10 w-[92vw] max-w-md rounded-xl bg-white shadow-2xl border border-gray-200 p-5">
             <div className="flex items-start justify-between">
               <h2 className="text-lg font-semibold">Schedule this post</h2>
-              <button className="text-gray-400 hover:text-gray-600" onClick={() => setShowSchedule(false)} aria-label="Close">✕</button>
+              <button
+                className="text-gray-400 hover:text-gray-600"
+                onClick={() => setShowSchedule(false)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
             </div>
 
-            <p className="text-center mt-2">Can you add if you want to post to another time zone just adjust it accordingly.</p>
-            
+            <p className="text-sm text-gray-600 mt-2">
+              Choose a future date &amp; time. The picker shows <strong>your local/system time</strong>.
+            </p>
+
+            {/* Current times for comparison 
+            <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
+              <div>
+                Current UTC (ISO-8601):{" "}
+                <span className="font-mono">{nowUtcIso}</span>
+              </div>
+              <div className="mt-1">
+                Your local now:{" "}
+                <span className="font-mono">{new Date().toLocaleString()}</span>
+                <p className="text-center mt-2">Can you add if you want to post to another time zone just adjust it accordingly.</p>
+              </div>
+            </div>*/}
+
             <div className="mt-4">
               <label className="text-sm font-medium text-gray-700">Date &amp; time</label>
               <input
@@ -1181,30 +1047,46 @@ export default function PublishPost() {
             </div>
 
             <div className="mt-5 flex items-center justify-end gap-3">
-              <button className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100" onClick={() => setShowSchedule(false)}>
+              <button
+                className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100"
+                onClick={() => setShowSchedule(false)}
+              >
                 Cancel
               </button>
               <button
-                className={`px-4 py-2 rounded-md text-white ${approveStatus === "posting" ? "bg-teal-300 cursor-not-allowed" : "bg-teal-600 hover:bg-teal-700"}`}
+                className={`px-4 py-2 rounded-md text-white ${
+                  approveStatus === "posting" ? "bg-teal-300 cursor-not-allowed" : "bg-teal-600 hover:bg-teal-700"
+                }`}
                 disabled={approveStatus === "posting"}
                 onClick={() => {
                   setScheduleErr(null);
-                  if (!enabledMap[selectedPlatform]) { setScheduleErr("This platform is not connected."); return; }
-                  if (selectedPlatform === "Reals") {
-                    if (reelsPlatform === "facebook" && !reelsFbEnabled) { setScheduleErr("Facebook Reels is not connected."); return; }
-                    if (reelsPlatform === "instagram" && !reelsIgEnabled) { setScheduleErr("Instagram Reels is not connected."); return; }
+
+                  if (!scheduledAtLocal) {
+                    setScheduleErr("Please pick a date & time.");
+                    return;
                   }
-                  if (!scheduledAtLocal) { setScheduleErr("Please pick a date & time."); return; }
+
                   const iso = localInputToISO(scheduledAtLocal);
-                  if (!iso) { setScheduleErr("Invalid date/time."); return; }
+                  if (!iso) {
+                    setScheduleErr("Invalid date/time.");
+                    return;
+                  }
+
                   const when = new Date(iso).getTime();
-                  if (isNaN(when) || when <= Date.now() + 60 * 1000) { setScheduleErr("Please pick a time at least 1 minute in the future."); return; }
+                  if (isNaN(when) || when <= Date.now() + 60 * 1000) {
+                    setScheduleErr("Please pick a time at least 1 minute in the future.");
+                    return;
+                  }
+
+                  // UI feedback immediately; approve() also sets this but we flip it early for snappier UX
                   setApproveStatus("posting");
                   void approve(iso);
+                  // on success approve() will setApproveStatus("posted") and setShowSchedule(false)
                 }}
               >
                 {approveStatus === "posting" ? "Posting…" : "Approve & Schedule"}
               </button>
+
             </div>
           </div>
         </div>
