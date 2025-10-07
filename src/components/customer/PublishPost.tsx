@@ -63,6 +63,20 @@ type ContentGeneration = {
   pinterest_description?: string | null;
 };
 
+type CustomerSettings = {
+  facebook_profile_id?: string | null;
+  facebook_page_ids?: string[] | string | null;
+  instagram_account_id?: string | null;
+  x_account_id?: string | null;
+  twitter_account_id?: string | null;
+  threads_account_id?: string | null;
+  tiktok_account_id?: string | null;
+  youtube_channel_id?: string | null;
+  linkedin_personal_id?: string | null;
+  linkedin_page_ids?: string[] | string | null;
+  pinterest_board_id?: string | null;
+};
+
 /* ========================= API base (robust) ========================= */
 const RAW_BASE = String(import.meta.env.VITE_API_BASE || "").replace(/\/+$/g, "");
 const API_BASE = RAW_BASE.endsWith("/api") ? RAW_BASE : `${RAW_BASE}/api`;
@@ -111,9 +125,9 @@ function normalizeStatus(s: string | null | undefined): "queued" | "posted" | "f
   return "queued";
 }
 
-const BASE_POLL_MS = 4000;      // start at 4s
-const MAX_POLL_MS  = 20000;     // cap at 20s
-const MAX_TOTAL_MS = 10 * 60 * 1000; // give up after 10 min
+const BASE_POLL_MS = 4000;
+const MAX_POLL_MS  = 20000;
+const MAX_TOTAL_MS = 10 * 60 * 1000;
 
 function nextDelay(prev: number) {
   const n = Math.min(Math.round(prev * 1.6), MAX_POLL_MS);
@@ -145,7 +159,7 @@ const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: Fiel
     image: { title: "x_title",                content: "x_content" },
     video: { title: "x_video_title",          content: "x_video_content" },
   },
-  Reals: { text: {}, image: {}, video: {} },
+  Reals: { text: {}, image: {}, video: {} }, // Reels UI
   "Tick Tok": {
     text:  { title: "tiktok_video_title",     content: "tiktok_video_content" },
     image: { title: "tiktok_video_title",     content: "tiktok_video_content" },
@@ -204,7 +218,6 @@ function toLocalInputValue(d: Date) {
   return `${y}-${m}-${day}T${h}:${min}`;
 }
 function localInputToISO(v: string) {
-  // Treat the value as local time, then convert to ISO (UTC)
   const dt = new Date(v.replace(" ", "T"));
   return isNaN(dt.getTime()) ? null : dt.toISOString();
 }
@@ -221,13 +234,68 @@ function nowUtcIsoSeconds() {
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}Z`;
 }
 
+/* ============================ settings helpers ============================ */
+function toList(v?: string[] | string | null): string[] {
+  if (!v) return [];
+  if (Array.isArray(v)) return v.filter(Boolean);
+  const s = String(v).trim();
+  if (!s) return [];
+  try {
+    const parsed = JSON.parse(s);
+    if (Array.isArray(parsed)) return parsed.filter(Boolean).map(String);
+  } catch {}
+  return s.split(",").map((x) => x.trim()).filter(Boolean);
+}
+
+// *** UPDATED: optimistic while loading; strict after loaded
+function computeEnabledPlatforms(s: CustomerSettings | null, loaded: boolean) {
+  // While settings are loading, keep everything enabled (optimistic UI)
+  if (!loaded) {
+    return {
+      Facebook: true,
+      Instagram: true,
+      Threads: true,
+      "Twitter/X": true,
+      Reals: true,
+      "Tick Tok": true,
+      "Linkedin Business": true,
+      "Linkedin Personal": true,
+      "YouTube Short": true,
+    };
+  }
+
+  const fbPages = toList(s?.facebook_page_ids);
+  const hasFacebookAny = !!(s?.facebook_profile_id || fbPages.length > 0);
+  const hasFacebookPages = fbPages.length > 0;
+
+  const hasInstagram   = !!s?.instagram_account_id;
+  const hasX           = !!(s?.x_account_id || s?.twitter_account_id);
+  const hasThreads     = !!s?.threads_account_id;
+  const hasTikTok      = !!s?.tiktok_account_id;
+  const hasYouTube     = !!s?.youtube_channel_id;           // only affects YT Short
+  const hasLiPersonal  = !!s?.linkedin_personal_id;
+  const liPages        = toList(s?.linkedin_page_ids);
+  const hasLiBusiness  = liPages.length > 0;
+
+  return {
+    Facebook: hasFacebookAny,
+    Instagram: hasInstagram,
+    Threads: hasThreads,
+    "Twitter/X": hasX,
+    Reals: hasFacebookPages || hasInstagram, // Reels if FB Pages or IG exists
+    "Tick Tok": hasTikTok,
+    "Linkedin Business": hasLiBusiness,
+    "Linkedin Personal": hasLiPersonal,
+    "YouTube Short": hasYouTube,             // only YouTube Short turns off if YT empty
+  };
+}
+
 /* =============================== Component =============================== */
 export default function PublishPost() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
-  // ------- derive dynamic context (blog | youtube | topic | launch) -------
   const context = useMemo<"blog" | "youtube" | "topic" | "launch">(() => {
     const p = pathname.toLowerCase();
     if (p.includes("/customer/youtube/") || p.includes("/youtube/")) return "youtube";
@@ -236,7 +304,7 @@ export default function PublishPost() {
     return "blog";
   }, [pathname]);
 
-  const TITLE_BY_CONTEXT: Record<typeof context, string> = {
+  const TITLE_BY_CONTEXT: Record<"blog" | "youtube" | "topic" | "launch", string> = {
     blog: "Toma Blog Automation",
     youtube: "Toma YouTube Automation",
     topic: "Toma Topic Automation",
@@ -264,21 +332,27 @@ export default function PublishPost() {
   const [approveStatus, setApproveStatus] = useState<"idle" | "posting" | "posted" | "error">("idle");
   const [approveError, setApproveError] = useState<string | null>(null);
 
-  // publish tracking
   const [lastSubmissionId, setLastSubmissionId] = useState<string | null>(null);
   const [lastPublishLogId, setLastPublishLogId] = useState<number | null>(null);
   const [publishStatus, setPublishStatus] = useState<"idle" | "queued" | "posted" | "failed">("idle");
   const [postedOnIso, setPostedOnIso] = useState<string | null>(null);
   const [publicUrl, setPublicUrl] = useState<string | null>(null);
 
-  // UI: overlay while waiting for final status (disabled per your note)
   const showStatusOverlay = false;
 
-  // debug heartbeat
   const [lastCheckAt, setLastCheckAt] = useState<number | null>(null);
   const [lastStatusRaw, setLastStatusRaw] = useState<string | null>(null);
   const [nextPollInMs, setNextPollInMs] = useState<number | null>(null);
   const [latestLogPollMs, setLatestLogPollMs] = useState<number>(5000);
+
+  const [settings, setSettings] = useState<CustomerSettings | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState<boolean>(true);
+
+  const enabledMap = useMemo(
+    () => computeEnabledPlatforms(settings, !settingsLoading),
+    [settings, settingsLoading]
+  );
 
   const customerId = useMemo(() => getCustomerIdFromAuth(), []);
   const platforms = Object.keys(FIELD_MAP);
@@ -289,7 +363,6 @@ export default function PublishPost() {
   );
   const effectivePostType: PostType = selectedPlatform === "Reals" ? "video" : postType;
 
-  // ====== dynamic links (Back / Logs) ======
   const contentId = record?.id ?? (id ? parseInt(id, 10) : null);
   const backUrl = useMemo(
     () => (contentId != null ? `/customer/${context}/view/${contentId}` : "/customer"),
@@ -300,15 +373,11 @@ export default function PublishPost() {
     [context, contentId]
   );
 
-  // ====== Scheduling modal state ======
   const [showSchedule, setShowSchedule] = useState(false);
   const [scheduledAtLocal, setScheduledAtLocal] = useState<string>("");
   const [scheduleErr, setScheduleErr] = useState<string | null>(null);
 
-  // ====== UTC clock state (for modal) ======
   const [nowUtcIso, setNowUtcIso] = useState<string>(nowUtcIsoSeconds());
-
-  // Tick UTC clock while modal is open
   useEffect(() => {
     if (!showSchedule) return;
     setNowUtcIso(nowUtcIsoSeconds());
@@ -332,7 +401,6 @@ export default function PublishPost() {
         const allowed = allowedPostTypes("Facebook");
         setPostType(allowed.includes(initial) ? initial : allowed[0]);
 
-        // Default schedule time ~10 minutes from now (rounded)
         const def = roundToNext5Min(new Date(Date.now() + 10 * 60 * 1000));
         setScheduledAtLocal(toLocalInputValue(def));
       } catch (e: any) {
@@ -344,6 +412,50 @@ export default function PublishPost() {
     if (id) load();
     return () => { cancelled = true; };
   }, [id]);
+
+  /* ------------------------ load customer settings ------------------------ */
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSettings() {
+      setSettingsLoading(true);
+      setSettingsError(null);
+      const cid = customerId;
+      const tries = [
+        `/customer-settings/${cid}`,
+        `/customer-settings?customer_id=${cid}`,
+        `/customer-settings/me`,
+      ];
+      for (const path of tries) {
+        try {
+          const js = await api<any>(path);
+          const data: CustomerSettings = js?.data ?? js ?? null;
+          if (data) {
+            if (!cancelled) setSettings(data);
+            break;
+          }
+        } catch {
+          // try next
+        }
+      }
+      if (!cancelled) setSettingsLoading(false);
+    }
+    loadSettings();
+    return () => { cancelled = true; };
+  }, [customerId]);
+
+  // After settings loaded, if current platform is disabled, jump to first enabled
+  useEffect(() => {
+    if (settingsLoading) return;
+    const enabledPlatforms = Object.entries(enabledMap).filter(([, v]) => v).map(([k]) => k);
+    if (!enabledPlatforms.length) return;
+    if (!enabledMap[selectedPlatform]) {
+      setSelectedPlatform(enabledPlatforms[0]);
+      if (enabledPlatforms[0] === "Reals") {
+        const fbOk = toList(settings?.facebook_page_ids).length > 0;
+        setReelsPlatform(fbOk ? "facebook" : "instagram");
+      }
+    }
+  }, [enabledMap, settings, settingsLoading, selectedPlatform]);
 
   /* -------------------------- persist video_url -------------------------- */
   async function persistVideoUrl(url: string) {
@@ -368,7 +480,7 @@ export default function PublishPost() {
   useEffect(() => {
     if (!record?.id) return;
     const trimmed = (videoUrl ?? "").trim();
-    if (!trimmed || trimmed === (record.video_url ?? "").trim()) return;
+    if (!trimmed || trimmed === (record?.video_url ?? "").trim()) return;
     const t = setTimeout(() => { void persistVideoUrl(trimmed); }, 700);
     return () => clearTimeout(t);
   }, [videoUrl, record?.id, record?.video_url]);
@@ -394,7 +506,10 @@ export default function PublishPost() {
 
   const pickPlatform = (p: string) => {
     setSelectedPlatform(p);
-    if (p === "Reals") setReelsPlatform("facebook");
+    if (p === "Reals") {
+      const fbOk = toList(settings?.facebook_page_ids).length > 0;
+      setReelsPlatform(fbOk ? "facebook" : "instagram");
+    }
     const allowed = allowedPostTypes(p);
     setPostType((prev) => (allowed.includes(prev) ? prev : allowed[0]));
   };
@@ -433,7 +548,7 @@ export default function PublishPost() {
           return;
         }
 
-        const finalStatus = String(log.final_status || "").toLowerCase(); // 'published' | 'failed' | ''
+        const finalStatus = String(log.final_status || "").toLowerCase();
         if (finalStatus === "published") {
           setPublishStatus("posted");
           setPublicUrl(log.publicUrl ?? null);
@@ -505,7 +620,6 @@ export default function PublishPost() {
           const subId: string | null = log.provider_post_id ?? null;
           if (subId) {
             setLastSubmissionId(subId);
-            // kick a first check
             void fetchStatusOnce(subId);
             return;
           }
@@ -635,6 +749,24 @@ export default function PublishPost() {
   /* -------------------------- Approve & Publish -------------------------- */
   async function approve(scheduledAtIso?: string) {
     if (!record?.id) return;
+
+    // Disallow posting if selected platform is not connected
+    if (!enabledMap[selectedPlatform]) {
+      setApproveStatus("error");
+      setApproveError("This platform is not connected. Connect it in Settings first.");
+      return;
+    }
+    // If Reels, ensure chosen sub-destination is connected
+    if (selectedPlatform === "Reals") {
+      const fbOk = toList(settings?.facebook_page_ids).length > 0;
+      const igOk = !!settings?.instagram_account_id;
+      if ((reelsPlatform === "facebook" && !fbOk) || (reelsPlatform === "instagram" && !igOk)) {
+        setApproveStatus("error");
+        setApproveError(`The selected Reels destination (${reelsPlatform}) is not connected.`);
+        return;
+      }
+    }
+
     setApproveStatus("posting");
     setApproveError(null);
 
@@ -720,23 +852,11 @@ export default function PublishPost() {
   if (loading) return <div className="p-6">Loading post…</div>;
   if (loadError) return <div className="p-6 text-red-600">Failed to load: {loadError}</div>;
 
+  const reelsFbEnabled = toList(settings?.facebook_page_ids).length > 0;
+  const reelsIgEnabled = !!settings?.instagram_account_id;
+
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-8 px-4">
-      {/* ====== Overlay while we wait for final status ====== */}
-      {showStatusOverlay && (
-        <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] flex items-center justify-center">
-          <div className="bg-white rounded-xl shadow-2xl p-6 w-80 text-center">
-            <div className="mx-auto mb-3 h-6 w-6 rounded-full border-2 border-gray-300 border-t-transparent animate-spin" />
-            <div className="text-sm text-gray-800 font-medium">
-              Please wait — getting post status from Blotato…
-            </div>
-            <div className="text-[11px] text-gray-500 mt-2">
-              This can take 1–3 minutes for video posts.
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Header */}
       <h1 className="text-xl font-semibold mb-2">{TITLE_BY_CONTEXT[context]}</h1>
 
@@ -756,6 +876,8 @@ export default function PublishPost() {
         >
           Refresh status
         </button>
+        {settingsLoading && <span className="text-xs text-gray-500">Loading connections…</span>}
+        {settingsError && <span className="text-xs text-red-600">Settings error: {settingsError}</span>}
       </div>
 
       {/* Video URL row */}
@@ -791,16 +913,27 @@ export default function PublishPost() {
         <div className="space-y-2">
           {platforms.map((p) => {
             const active = p === selectedPlatform;
+            const enabled = enabledMap[p];
             return (
               <button
                 key={p}
-                onClick={() => pickPlatform(p)}
-                className={`w-full py-2 rounded-md border ${
-                  active ? "bg-blue-100 border-blue-400 text-blue-600 font-medium"
-                         : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
+                onClick={() => enabled && pickPlatform(p)}
+                disabled={!enabled}
+                className={`w-full py-2 rounded-md border relative ${
+                  enabled
+                    ? active
+                      ? "bg-blue-100 border-blue-400 text-blue-600 font-medium"
+                      : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
+                    : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
                 }`}
+                title={enabled ? "" : "Connect this platform in Settings to enable"}
               >
                 {p}
+                {!enabled && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-400">
+                    Connect in Settings
+                  </span>
+                )}
               </button>
             );
           })}
@@ -826,13 +959,25 @@ export default function PublishPost() {
           {/* Radios */}
           {selectedPlatform === "Reals" ? (
             <div className="space-y-2">
-              <label className="flex items-center gap-2">
-                <input type="radio" checked={reelsPlatform === "facebook"} onChange={() => setReelsPlatform("facebook")} />
-                Facebook
+              <label className={`flex items-center gap-2 ${reelsFbEnabled ? "" : "opacity-50"}`}>
+                <input
+                  type="radio"
+                  checked={reelsPlatform === "facebook"}
+                  onChange={() => reelsFbEnabled && setReelsPlatform("facebook")}
+                  disabled={!reelsFbEnabled}
+                />
+                Facebook (Reels)
+                {!reelsFbEnabled && <span className="text-[10px] text-gray-400">(connect FB Page)</span>}
               </label>
-              <label className="flex items-center gap-2">
-                <input type="radio" checked={reelsPlatform === "instagram"} onChange={() => setReelsPlatform("instagram")} />
-                Instagram
+              <label className={`flex items-center gap-2 ${reelsIgEnabled ? "" : "opacity-50"}`}>
+                <input
+                  type="radio"
+                  checked={reelsPlatform === "instagram"}
+                  onChange={() => reelsIgEnabled && setReelsPlatform("instagram")}
+                  disabled={!reelsIgEnabled}
+                />
+                Instagram (Reels)
+                {!reelsIgEnabled && <span className="text-[10px] text-gray-400">(connect IG Account)</span>}
               </label>
             </div>
           ) : (
@@ -862,9 +1007,11 @@ export default function PublishPost() {
         {/* Right: actions + STATUS PANEL */}
         <div className="flex flex-col justify-between space-y-4">
           <button
-            className="w-full bg-orange-500 text-white py-2 rounded-md hover:bg-orange-600"
+            className="w-full bg-orange-500 text-white py-2 rounded-md hover:bg-orange-600 disabled:opacity-60"
+            disabled={!enabledMap[selectedPlatform]}
             onClick={() => {
               setScheduleErr(null);
+              if (!enabledMap[selectedPlatform]) return;
               if (!scheduledAtLocal) {
                 const def = roundToNext5Min(new Date(Date.now() + 10 * 60 * 1000));
                 setScheduledAtLocal(toLocalInputValue(def));
@@ -876,9 +1023,12 @@ export default function PublishPost() {
           </button>
 
           <button
-            className={`w-full text-white py-2 rounded-md ${approveStatus === "posting" ? "bg-teal-300" : "bg-teal-500 hover:bg-teal-600"}`}
-            disabled={approveStatus === "posting"}
+            className={`w-full text-white py-2 rounded-md ${
+              approveStatus === "posting" ? "bg-teal-300" : "bg-teal-500 hover:bg-teal-600"
+            } disabled:opacity-60`}
+            disabled={approveStatus === "posting" || !enabledMap[selectedPlatform]}
             onClick={() => void approve()}
+            title={enabledMap[selectedPlatform] ? "" : "Connect this platform in Settings to enable"}
           >
             {approveStatus === "posting" ? "Submitting…" : "Approve & Publish"}
           </button>
@@ -886,15 +1036,24 @@ export default function PublishPost() {
           <div className="rounded-md border border-gray-200 p-3 text-sm bg-gray-50">
             <div className="flex items-center justify-between">
               <span className="text-gray-600">Publish status</span>
-              <span className={`font-medium ${
-                publishStatus === "posted" ? "text-green-600" :
-                publishStatus === "failed" ? "text-red-600" :
-                publishStatus === "queued" ? "text-amber-600" : "text-gray-500"
-              }`}>
-                {publishStatus === "idle" ? "—" :
-                 publishStatus === "queued" ? "Queued" :
-                 publishStatus === "posted" ? "Published" :
-                 "Failed"}
+              <span
+                className={`font-medium ${
+                  publishStatus === "posted"
+                    ? "text-green-600"
+                    : publishStatus === "failed"
+                    ? "text-red-600"
+                    : publishStatus === "queued"
+                    ? "text-amber-600"
+                    : "text-gray-500"
+                }`}
+              >
+                {publishStatus === "idle"
+                  ? "—"
+                  : publishStatus === "queued"
+                  ? "Queued"
+                  : publishStatus === "posted"
+                  ? "Published"
+                  : "Failed"}
               </span>
             </div>
             <div className="flex items-center justify-between mt-1">
@@ -916,7 +1075,6 @@ export default function PublishPost() {
               </div>
             )}
 
-            {/* Heartbeat line so you can see it polling */}
             <div className="text-[11px] text-gray-400 mt-1">
               {lastCheckAt && <>Last check: {new Date(lastCheckAt).toLocaleTimeString()} </>}
               {typeof lastStatusRaw === "string" && lastStatusRaw && <>• raw: {lastStatusRaw} </>}
@@ -924,13 +1082,9 @@ export default function PublishPost() {
               {!lastSubmissionId && <>Waiting for submission id…</>}
             </div>
 
-            <a
-              href={logsUrl}
-              className="text-blue-600 hover:underline"
-            >
+            <a href={logsUrl} className="text-blue-600 hover:underline">
               View Publish Logs
             </a>
-
           </div>
 
           <div className="min-h-5 text-xs">
@@ -956,7 +1110,7 @@ export default function PublishPost() {
 
             <div className="flex items-center gap-2 text-xs">
               <span className="text-gray-500">Preview size:</span>
-              {(["sm","md","lg"] as const).map((s) => (
+              {(["sm", "md", "lg"] as const).map((s) => (
                 <label key={s} className="flex items-center gap-1 cursor-pointer">
                   <input type="radio" checked={previewSize === s} onChange={() => setPreviewSize(s)} />
                   <span className={previewSize === s ? "font-medium" : ""}>{s.toUpperCase()}</span>
@@ -967,11 +1121,15 @@ export default function PublishPost() {
 
           {previewMedia.showVideo ? (
             isPlayableVideo(previewMedia.videoUrl) ? (
-              <div className={`rounded-md mb-3 border border-gray-200 overflow-hidden flex items-center justify-center bg-black/5 ${mediaBoxClassBySize[previewSize]}`}>
+              <div
+                className={`rounded-md mb-3 border border-gray-200 overflow-hidden flex items-center justify-center bg-black/5 ${mediaBoxClassBySize[previewSize]}`}
+              >
                 <video key={previewMedia.videoUrl} src={previewMedia.videoUrl} controls className="w-full h-full object-cover" />
               </div>
             ) : (
-              <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
+              <div
+                className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}
+              >
                 {previewMedia.videoUrl ? "Video URL isn't a direct .mp4/.webm/.mov/.m4v — preview not available" : "No video URL provided"}
               </div>
             )
@@ -981,7 +1139,9 @@ export default function PublishPost() {
                 <img src={previewMedia.imageUrl} alt="Post image" className="w-full h-full object-cover" />
               </div>
             ) : (
-              <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
+              <div
+                className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}
+              >
                 No image available
               </div>
             )
@@ -1000,12 +1160,7 @@ export default function PublishPost() {
       {/* ====== Schedule Modal ====== */}
       {showSchedule && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setShowSchedule(false)}
-          />
-          {/* Dialog */}
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowSchedule(false)} />
           <div className="relative z-10 w-[92vw] max-w-md rounded-xl bg-white shadow-2xl border border-gray-200 p-5">
             <div className="flex items-start justify-between">
               <h2 className="text-lg font-semibold">Schedule this post</h2>
@@ -1018,22 +1173,7 @@ export default function PublishPost() {
               </button>
             </div>
 
-            <p className="text-sm text-gray-600 mt-2">
-              Choose a future date &amp; time. The picker shows <strong>your local/system time</strong>.
-            </p>
-
-            {/* Current times for comparison 
-            <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
-              <div>
-                Current UTC (ISO-8601):{" "}
-                <span className="font-mono">{nowUtcIso}</span>
-              </div>
-              <div className="mt-1">
-                Your local now:{" "}
-                <span className="font-mono">{new Date().toLocaleString()}</span>
-                <p className="text-center mt-2">Can you add if you want to post to another time zone just adjust it accordingly.</p>
-              </div>
-            </div>*/}
+            <p className="text-center mt-2">Can you add if you want to post to another time zone just adjust it accordingly.</p>
 
             <div className="mt-4">
               <label className="text-sm font-medium text-gray-700">Date &amp; time</label>
@@ -1061,6 +1201,21 @@ export default function PublishPost() {
                 onClick={() => {
                   setScheduleErr(null);
 
+                  if (!enabledMap[selectedPlatform]) {
+                    setScheduleErr("This platform is not connected.");
+                    return;
+                  }
+                  if (selectedPlatform === "Reals") {
+                    if (reelsPlatform === "facebook" && !reelsFbEnabled) {
+                      setScheduleErr("Facebook Reels is not connected.");
+                      return;
+                    }
+                    if (reelsPlatform === "instagram" && !reelsIgEnabled) {
+                      setScheduleErr("Instagram Reels is not connected.");
+                      return;
+                    }
+                  }
+
                   if (!scheduledAtLocal) {
                     setScheduleErr("Please pick a date & time.");
                     return;
@@ -1078,15 +1233,12 @@ export default function PublishPost() {
                     return;
                   }
 
-                  // UI feedback immediately; approve() also sets this but we flip it early for snappier UX
                   setApproveStatus("posting");
                   void approve(iso);
-                  // on success approve() will setApproveStatus("posted") and setShowSchedule(false)
                 }}
               >
                 {approveStatus === "posting" ? "Posting…" : "Approve & Schedule"}
               </button>
-
             </div>
           </div>
         </div>
