@@ -468,7 +468,6 @@ export default function PublishPost() {
         // ✅ EXACTLY how you call it: /settings?customer_id=#
         const [s, c] = await Promise.allSettled([
           api<any>(`/settings?customer_id=${encodeURIComponent(customerId)}`),
-          api<any>("/social/connections"),
         ]);
         if (!cancelled) {
           if (s.status === "fulfilled") setSettings(s.value?.data ?? s.value ?? null);
