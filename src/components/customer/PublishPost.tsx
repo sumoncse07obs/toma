@@ -74,7 +74,13 @@ type CustomerSettings = {
   youtube_channel_id?: string | null;
   linkedin_personal_id?: string | null;
   linkedin_page_ids?: string[] | string | null;
-  pinterest_board_id?: string | null;
+};
+
+type SocialConnection = {
+  id: number | string;
+  provider: string;   // e.g. 'facebook', 'facebook_page', 'instagram', 'x', 'twitter', 'tiktok', 'youtube', 'linkedin_page', 'linkedin_personal', 'threads'
+  kind?: string | null;
+  meta?: any;
 };
 
 /* ========================= API base (robust) ========================= */
@@ -82,12 +88,9 @@ const RAW_BASE = String(import.meta.env.VITE_API_BASE || "").replace(/\/+$/g, ""
 const API_BASE = RAW_BASE.endsWith("/api") ? RAW_BASE : `${RAW_BASE}/api`;
 const TOKEN_KEY = "toma_token";
 
-/** normalize URL and keep one slash */
 function norm(path: string) {
   return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`.replace(/([^:]\/)\/+/g, "$1");
 }
-
-/** token-based API helper (no cookies/credentials) */
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem(TOKEN_KEY);
   const res = await fetch(norm(path), {
@@ -103,32 +106,28 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const text = await res.text().catch(() => "");
     let msg = text || res.statusText || "Request failed";
     try {
-      const j = JSON.parse(text);
-      msg = j?.message || msg;
+      msg = JSON.parse(text)?.message || msg;
     } catch {}
     throw new Error(`HTTP ${res.status}: ${msg}`);
   }
   const ct = res.headers.get("content-type") || "";
   return (ct.includes("application/json") ? await res.json() : (undefined as any)) as T;
 }
-
 function getCustomerIdFromAuth(): number {
   const u: any = currentUser?.() ?? null;
   return u?.customer_id ?? u?.customer?.id ?? u?.profile?.customer_id ?? u?.company?.customer_id ?? 1;
 }
 
-/* ===================== Status normalization + polling helpers ===================== */
+/* ===================== Status helpers ===================== */
 function normalizeStatus(s: string | null | undefined): "queued" | "posted" | "failed" {
   const v = String(s || "").toLowerCase();
   if (["success", "published", "complete", "completed", "posted"].includes(v)) return "posted";
   if (["fail", "failed", "error"].includes(v)) return "failed";
   return "queued";
 }
-
 const BASE_POLL_MS = 4000;
 const MAX_POLL_MS  = 20000;
 const MAX_TOTAL_MS = 10 * 60 * 1000;
-
 function nextDelay(prev: number) {
   const n = Math.min(Math.round(prev * 1.6), MAX_POLL_MS);
   const jitter = Math.floor(Math.random() * 500);
@@ -137,7 +136,6 @@ function nextDelay(prev: number) {
 
 /* =============================== Field map =============================== */
 type FieldKeys = { title?: keyof ContentGeneration; content?: keyof ContentGeneration };
-
 const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: FieldKeys }> = {
   Facebook: {
     text:  { title: "facebook_title",         content: "facebook_content" },
@@ -159,7 +157,7 @@ const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: Fiel
     image: { title: "x_title",                content: "x_content" },
     video: { title: "x_video_title",          content: "x_video_content" },
   },
-  Reals: { text: {}, image: {}, video: {} }, // Reels UI
+  Reals: { text: {}, image: {}, video: {} },
   "Tick Tok": {
     text:  { title: "tiktok_video_title",     content: "tiktok_video_content" },
     image: { title: "tiktok_video_title",     content: "tiktok_video_content" },
@@ -210,19 +208,12 @@ function roundToNext5Min(d = new Date()) {
 }
 function toLocalInputValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
-  const y = d.getFullYear();
-  const m = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  const h = pad(d.getHours());
-  const min = pad(d.getMinutes());
-  return `${y}-${m}-${day}T${h}:${min}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 function localInputToISO(v: string) {
   const dt = new Date(v.replace(" ", "T"));
   return isNaN(dt.getTime()) ? null : dt.toISOString();
 }
-
-// ---- UTC clock helpers (seconds precision, no milliseconds) ----
 function nowUtcIsoSeconds() {
   const d = new Date();
   const yyyy = d.getUTCFullYear();
@@ -247,10 +238,84 @@ function toList(v?: string[] | string | null): string[] {
   return s.split(",").map((x) => x.trim()).filter(Boolean);
 }
 
-// *** UPDATED: optimistic while loading; strict after loaded
-function computeEnabledPlatforms(s: CustomerSettings | null, loaded: boolean) {
-  // While settings are loading, keep everything enabled (optimistic UI)
+// Build enable map from /social/connections (preferred)
+function computeFromConnections(conns: SocialConnection[] | null | undefined) {
+  const map = {
+    Facebook: false,
+    Instagram: false,
+    Threads: false,
+    "Twitter/X": false,
+    Reals: false,
+    "Tick Tok": false,
+    "Linkedin Business": false,
+    "Linkedin Personal": false,
+    "YouTube Short": false,
+  };
+  if (!conns?.length) return map;
+
+  let hasFb = false;
+  let hasFbPage = false;
+  let hasIg = false;
+
+  for (const c of conns) {
+    const p = (c.provider || "").toLowerCase();
+    if (p.includes("facebook_page")) hasFbPage = true;
+    if (p === "facebook" || p.includes("meta_facebook")) hasFb = true;
+
+    if (p.includes("instagram")) hasIg = true;
+    if (p === "threads") map["Threads"] = true;
+
+    if (p === "x" || p === "twitter") map["Twitter/X"] = true;
+    if (p === "tiktok") map["Tick Tok"] = true;
+    if (p.startsWith("youtube")) map["YouTube Short"] = true;
+
+    if (p.includes("linkedin_page")) map["Linkedin Business"] = true;
+    if (p.includes("linkedin_personal") || p === "linkedin") map["Linkedin Personal"] = true;
+  }
+
+  map["Facebook"] = hasFb || hasFbPage;
+  map["Instagram"] = hasIg;
+  map["Reals"] = hasFbPage || hasIg; // Reels needs FB Page or IG business
+
+  return map;
+}
+
+// Fallback from /settings fields
+function computeFromSettings(s: CustomerSettings | null) {
+  const fbPages = toList(s?.facebook_page_ids);
+  const hasFacebookAny = !!(s?.facebook_profile_id || fbPages.length > 0);
+  const hasFacebookPages = fbPages.length > 0;
+
+  const hasInstagram   = !!s?.instagram_account_id;
+  const hasX           = !!(s?.x_account_id || s?.twitter_account_id);
+  const hasThreads     = !!s?.threads_account_id;
+  const hasTikTok      = !!s?.tiktok_account_id;
+  const hasYouTube     = !!s?.youtube_channel_id;
+  const liPages        = toList(s?.linkedin_page_ids);
+  const hasLiBusiness  = liPages.length > 0;
+  const hasLiPersonal  = !!s?.linkedin_personal_id;
+
+  return {
+    Facebook: hasFacebookAny,
+    Instagram: hasInstagram,
+    Threads: hasThreads,
+    "Twitter/X": hasX,
+    Reals: hasFacebookPages || hasInstagram,
+    "Tick Tok": hasTikTok,
+    "Linkedin Business": hasLiBusiness,
+    "Linkedin Personal": hasLiPersonal,
+    "YouTube Short": hasYouTube,
+  };
+}
+
+// Final enable map (optimistic while loading; OR of connections + settings)
+function computeEnabledPlatforms(
+  loaded: boolean,
+  connMap: ReturnType<typeof computeFromConnections>,
+  setMap: ReturnType<typeof computeFromSettings>
+) {
   if (!loaded) {
+    // optimistic: everything enabled while loading
     return {
       Facebook: true,
       Instagram: true,
@@ -263,31 +328,12 @@ function computeEnabledPlatforms(s: CustomerSettings | null, loaded: boolean) {
       "YouTube Short": true,
     };
   }
-
-  const fbPages = toList(s?.facebook_page_ids);
-  const hasFacebookAny = !!(s?.facebook_profile_id || fbPages.length > 0);
-  const hasFacebookPages = fbPages.length > 0;
-
-  const hasInstagram   = !!s?.instagram_account_id;
-  const hasX           = !!(s?.x_account_id || s?.twitter_account_id);
-  const hasThreads     = !!s?.threads_account_id;
-  const hasTikTok      = !!s?.tiktok_account_id;
-  const hasYouTube     = !!s?.youtube_channel_id;           // only affects YT Short
-  const hasLiPersonal  = !!s?.linkedin_personal_id;
-  const liPages        = toList(s?.linkedin_page_ids);
-  const hasLiBusiness  = liPages.length > 0;
-
-  return {
-    Facebook: hasFacebookAny,
-    Instagram: hasInstagram,
-    Threads: hasThreads,
-    "Twitter/X": hasX,
-    Reals: hasFacebookPages || hasInstagram, // Reels if FB Pages or IG exists
-    "Tick Tok": hasTikTok,
-    "Linkedin Business": hasLiBusiness,
-    "Linkedin Personal": hasLiPersonal,
-    "YouTube Short": hasYouTube,             // only YouTube Short turns off if YT empty
-  };
+  // Merge: if connections say it's on OR settings have the id => enabled
+  const out: any = {};
+  for (const k of Object.keys(setMap) as (keyof typeof setMap)[]) {
+    out[k] = Boolean((connMap as any)[k] || (setMap as any)[k]);
+  }
+  return out as typeof setMap;
 }
 
 /* =============================== Component =============================== */
@@ -345,13 +391,17 @@ export default function PublishPost() {
   const [nextPollInMs, setNextPollInMs] = useState<number | null>(null);
   const [latestLogPollMs, setLatestLogPollMs] = useState<number>(5000);
 
+  // Settings & connections
   const [settings, setSettings] = useState<CustomerSettings | null>(null);
+  const [connections, setConnections] = useState<SocialConnection[] | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsLoading, setSettingsLoading] = useState<boolean>(true);
 
+  const setMap = useMemo(() => computeFromSettings(settings), [settings]);
+  const connMap = useMemo(() => computeFromConnections(connections), [connections]);
   const enabledMap = useMemo(
-    () => computeEnabledPlatforms(settings, !settingsLoading),
-    [settings, settingsLoading]
+    () => computeEnabledPlatforms(!settingsLoading, connMap, setMap),
+    [settingsLoading, connMap, setMap]
   );
 
   const customerId = useMemo(() => getCustomerIdFromAuth(), []);
@@ -413,37 +463,35 @@ export default function PublishPost() {
     return () => { cancelled = true; };
   }, [id]);
 
-  /* ------------------------ load customer settings ------------------------ */
+  /* ------------------------ load settings + connections ------------------------ */
   useEffect(() => {
     let cancelled = false;
-    async function loadSettings() {
+    async function loadAll() {
       setSettingsLoading(true);
       setSettingsError(null);
-      const cid = customerId;
-      const tries = [
-        `/customer-settings/${cid}`,
-        `/customer-settings?customer_id=${cid}`,
-        `/customer-settings/me`,
-      ];
-      for (const path of tries) {
-        try {
-          const js = await api<any>(path);
-          const data: CustomerSettings = js?.data ?? js ?? null;
-          if (data) {
-            if (!cancelled) setSettings(data);
-            break;
-          }
-        } catch {
-          // try next
+      try {
+        // ✅ Your routes:
+        // GET /settings (authenticated)
+        // GET /social/connections (authenticated)
+        const [s, c] = await Promise.allSettled([
+          api<any>("/settings"),
+          api<any>("/social/connections"),
+        ]);
+        if (!cancelled) {
+          if (s.status === "fulfilled") setSettings(s.value?.data ?? s.value ?? null);
+          if (c.status === "fulfilled") setConnections(c.value?.data ?? c.value ?? null);
         }
+      } catch (e: any) {
+        if (!cancelled) setSettingsError(e?.message || "Failed to load settings");
+      } finally {
+        if (!cancelled) setSettingsLoading(false);
       }
-      if (!cancelled) setSettingsLoading(false);
     }
-    loadSettings();
+    loadAll();
     return () => { cancelled = true; };
-  }, [customerId]);
+  }, []);
 
-  // After settings loaded, if current platform is disabled, jump to first enabled
+  // After settings load, if current platform is disabled, jump to first enabled
   useEffect(() => {
     if (settingsLoading) return;
     const enabledPlatforms = Object.entries(enabledMap).filter(([, v]) => v).map(([k]) => k);
@@ -451,11 +499,12 @@ export default function PublishPost() {
     if (!enabledMap[selectedPlatform]) {
       setSelectedPlatform(enabledPlatforms[0]);
       if (enabledPlatforms[0] === "Reals") {
-        const fbOk = toList(settings?.facebook_page_ids).length > 0;
-        setReelsPlatform(fbOk ? "facebook" : "instagram");
+        const fbOk = connMap["Facebook"] && (connections || []).some(c => (c.provider||"").toLowerCase().includes("facebook_page"));
+        const igOk = connMap["Instagram"];
+        setReelsPlatform(fbOk ? "facebook" : igOk ? "instagram" : "facebook");
       }
     }
-  }, [enabledMap, settings, settingsLoading, selectedPlatform]);
+  }, [enabledMap, settingsLoading, selectedPlatform, connMap, connections]);
 
   /* -------------------------- persist video_url -------------------------- */
   async function persistVideoUrl(url: string) {
@@ -507,8 +556,8 @@ export default function PublishPost() {
   const pickPlatform = (p: string) => {
     setSelectedPlatform(p);
     if (p === "Reals") {
-      const fbOk = toList(settings?.facebook_page_ids).length > 0;
-      setReelsPlatform(fbOk ? "facebook" : "instagram");
+      const hasFbPage = (connections || []).some(c => (c.provider||"").toLowerCase().includes("facebook_page"));
+      setReelsPlatform(hasFbPage ? "facebook" : "instagram");
     }
     const allowed = allowedPostTypes(p);
     setPostType((prev) => (allowed.includes(prev) ? prev : allowed[0]));
@@ -525,10 +574,9 @@ export default function PublishPost() {
     };
   }, [postType, selectedPlatform, record?.image_url, record?.video_url, videoUrl]);
 
-  /* -------------- load latest log (uses final_status/publicUrl) -------------- */
+  /* -------------- latest log -------------- */
   useEffect(() => {
     if (!record?.id) return;
-
     const loadLatest = async () => {
       try {
         const params = new URLSearchParams({
@@ -540,11 +588,8 @@ export default function PublishPost() {
         const log = js?.data;
 
         if (!log) {
-          setPublishStatus("idle");
-          setPostedOnIso(null);
-          setPublicUrl(null);
-          setLastSubmissionId(null);
-          setLastPublishLogId(null);
+          setPublishStatus("idle"); setPostedOnIso(null); setPublicUrl(null);
+          setLastSubmissionId(null); setLastPublishLogId(null);
           return;
         }
 
@@ -566,15 +611,12 @@ export default function PublishPost() {
         const subId: string | null = log.provider_post_id ?? null;
         setLastSubmissionId(subId);
         setLastPublishLogId(log.id ?? null);
-      } catch {
-        // silent
-      }
+      } catch {/* ignore */}
     };
-
     void loadLatest();
   }, [record?.id, platformKey, effectivePostType]);
 
-  /* ---- If we don't have provider_post_id yet, keep polling latestLog ---- */
+  /* ---- poll latest until submission id appears ---- */
   useEffect(() => {
     if (!record?.id) return;
     if (lastSubmissionId) return;
@@ -631,20 +673,15 @@ export default function PublishPost() {
     }
 
     t = window.setTimeout(pollLatest, latestLogPollMs);
-    return () => {
-      stop = true;
-      if (t) clearTimeout(t);
-    };
+    return () => { stop = true; if (t) clearTimeout(t); };
   }, [record?.id, lastSubmissionId, publishStatus, platformKey, effectivePostType, latestLogPollMs]);
 
-  /* ------------------ one-shot status fetch (updates UI) ------------------ */
   async function fetchStatusOnce(subId: string) {
     try {
       const js = await api<any>(`/publish/status/${subId}`);
       setLastCheckAt(Date.now());
       setLastStatusRaw(String(js?.status ?? ""));
       const uiStatus = normalizeStatus(js?.status);
-
       if (uiStatus === "posted") {
         setPublishStatus("posted");
         setPublicUrl(js?.publicUrl || null);
@@ -659,7 +696,6 @@ export default function PublishPost() {
     }
   }
 
-  /* --------------- Adaptive polling against /publish/status --------------- */
   useEffect(() => {
     if (!lastSubmissionId) return;
     if (publishStatus === "posted" || publishStatus === "failed") return;
@@ -671,9 +707,7 @@ export default function PublishPost() {
     const controller = new AbortController();
 
     function shouldPollNow() {
-      return typeof document !== "undefined"
-        ? document.visibilityState === "visible"
-        : true;
+      return typeof document !== "undefined" ? document.visibilityState === "visible" : true;
     }
 
     async function pollOnce(): Promise<boolean> {
@@ -695,7 +729,6 @@ export default function PublishPost() {
           setNextPollInMs(null);
           return true;
         }
-
         setPublishStatus("queued");
         return false;
       } catch {
@@ -706,13 +739,11 @@ export default function PublishPost() {
 
     async function loop() {
       if (cancelled) return;
-
       if (!shouldPollNow()) {
         setNextPollInMs(2000);
         timeoutId = window.setTimeout(loop, 2000);
         return;
       }
-
       const done = await pollOnce();
       if (cancelled || done) return;
 
@@ -722,14 +753,12 @@ export default function PublishPost() {
         setNextPollInMs(null);
         return;
       }
-
       delay = nextDelay(delay);
       setNextPollInMs(delay);
       timeoutId = window.setTimeout(loop, delay);
     }
 
     loop();
-
     const visHandler = () => {
       if (document.visibilityState === "visible") {
         if (timeoutId) clearTimeout(timeoutId);
@@ -750,17 +779,15 @@ export default function PublishPost() {
   async function approve(scheduledAtIso?: string) {
     if (!record?.id) return;
 
-    // Disallow posting if selected platform is not connected
     if (!enabledMap[selectedPlatform]) {
       setApproveStatus("error");
       setApproveError("This platform is not connected. Connect it in Settings first.");
       return;
     }
-    // If Reels, ensure chosen sub-destination is connected
     if (selectedPlatform === "Reals") {
-      const fbOk = toList(settings?.facebook_page_ids).length > 0;
-      const igOk = !!settings?.instagram_account_id;
-      if ((reelsPlatform === "facebook" && !fbOk) || (reelsPlatform === "instagram" && !igOk)) {
+      const hasFbPage = (connections || []).some(c => (c.provider||"").toLowerCase().includes("facebook_page"));
+      const hasIg = connMap["Instagram"];
+      if ((reelsPlatform === "facebook" && !hasFbPage) || (reelsPlatform === "instagram" && !hasIg)) {
         setApproveStatus("error");
         setApproveError(`The selected Reels destination (${reelsPlatform}) is not connected.`);
         return;
@@ -772,10 +799,9 @@ export default function PublishPost() {
 
     let keys: FieldKeys;
     if (selectedPlatform === "Reals") {
-      keys =
-        reelsPlatform === "facebook"
-          ? { title: "facebook_reels_title", content: "facebook_reels_content" }
-          : { title: "instagram_reels_title", content: "instagram_reels_content" };
+      keys = reelsPlatform === "facebook"
+        ? { title: "facebook_reels_title", content: "facebook_reels_content" }
+        : { title: "instagram_reels_title", content: "instagram_reels_content" };
     } else {
       keys = FIELD_MAP[selectedPlatform][postType];
     }
@@ -852,21 +878,17 @@ export default function PublishPost() {
   if (loading) return <div className="p-6">Loading post…</div>;
   if (loadError) return <div className="p-6 text-red-600">Failed to load: {loadError}</div>;
 
-  const reelsFbEnabled = toList(settings?.facebook_page_ids).length > 0;
-  const reelsIgEnabled = !!settings?.instagram_account_id;
+  const reelsFbEnabled = (connections || []).some(c => (c.provider||"").toLowerCase().includes("facebook_page"));
+  const reelsIgEnabled = enabledMap["Instagram"];
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-8 px-4">
-      {/* Header */}
       <h1 className="text-xl font-semibold mb-2">{TITLE_BY_CONTEXT[context]}</h1>
 
-      {/* Back + Refresh */}
       <div className="mb-6 flex items-center gap-3">
         <button
           className="bg-teal-500 text-white px-6 py-2 rounded-md hover:bg-teal-600"
-          onClick={() => {
-            if (contentId != null) navigate(backUrl);
-          }}
+          onClick={() => { if (contentId != null) navigate(backUrl); }}
         >
           Back
         </button>
@@ -880,7 +902,6 @@ export default function PublishPost() {
         {settingsError && <span className="text-xs text-red-600">Settings error: {settingsError}</span>}
       </div>
 
-      {/* Video URL row */}
       <div className="flex gap-3 items-center w-full max-w-4xl mb-1">
         <label className="text-sm font-medium whitespace-nowrap">Put New Video Url Here</label>
         <input
@@ -898,7 +919,6 @@ export default function PublishPost() {
         />
       </div>
 
-      {/* Save status row */}
       <div className="w-full max-w-4xl mb-6 text-xs min-h-5">
         {savingVideo === "saving" && <span className="text-amber-600">Saving…</span>}
         {savingVideo === "saved" && <span className="text-green-600">Saved</span>}
@@ -907,7 +927,6 @@ export default function PublishPost() {
         )}
       </div>
 
-      {/* Main content */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
         {/* Left: platforms */}
         <div className="space-y-2">
@@ -917,7 +936,7 @@ export default function PublishPost() {
             return (
               <button
                 key={p}
-                onClick={() => enabled && pickPlatform(p)}
+                onClick={() => enabled && setSelectedPlatform(p)}
                 disabled={!enabled}
                 className={`w-full py-2 rounded-md border relative ${
                   enabled
@@ -956,7 +975,6 @@ export default function PublishPost() {
             placeholder="Post text / description"
           />
 
-          {/* Radios */}
           {selectedPlatform === "Reals" ? (
             <div className="space-y-2">
               <label className={`flex items-center gap-2 ${reelsFbEnabled ? "" : "opacity-50"}`}>
@@ -1047,13 +1065,7 @@ export default function PublishPost() {
                     : "text-gray-500"
                 }`}
               >
-                {publishStatus === "idle"
-                  ? "—"
-                  : publishStatus === "queued"
-                  ? "Queued"
-                  : publishStatus === "posted"
-                  ? "Published"
-                  : "Failed"}
+                {publishStatus === "idle" ? "—" : publishStatus === "queued" ? "Queued" : publishStatus === "posted" ? "Published" : "Failed"}
               </span>
             </div>
             <div className="flex items-center justify-between mt-1">
@@ -1082,9 +1094,7 @@ export default function PublishPost() {
               {!lastSubmissionId && <>Waiting for submission id…</>}
             </div>
 
-            <a href={logsUrl} className="text-blue-600 hover:underline">
-              View Publish Logs
-            </a>
+            <a href={logsUrl} className="text-blue-600 hover:underline">View Publish Logs</a>
           </div>
 
           <div className="min-h-5 text-xs">
@@ -1110,7 +1120,7 @@ export default function PublishPost() {
 
             <div className="flex items-center gap-2 text-xs">
               <span className="text-gray-500">Preview size:</span>
-              {(["sm", "md", "lg"] as const).map((s) => (
+              {(["sm","md","lg"] as const).map((s) => (
                 <label key={s} className="flex items-center gap-1 cursor-pointer">
                   <input type="radio" checked={previewSize === s} onChange={() => setPreviewSize(s)} />
                   <span className={previewSize === s ? "font-medium" : ""}>{s.toUpperCase()}</span>
@@ -1119,38 +1129,36 @@ export default function PublishPost() {
             </div>
           </div>
 
-          {previewMedia.showVideo ? (
-            isPlayableVideo(previewMedia.videoUrl) ? (
-              <div
-                className={`rounded-md mb-3 border border-gray-200 overflow-hidden flex items-center justify-center bg-black/5 ${mediaBoxClassBySize[previewSize]}`}
-              >
-                <video key={previewMedia.videoUrl} src={previewMedia.videoUrl} controls className="w-full h-full object-cover" />
-              </div>
-            ) : (
-              <div
-                className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}
-              >
-                {previewMedia.videoUrl ? "Video URL isn't a direct .mp4/.webm/.mov/.m4v — preview not available" : "No video URL provided"}
-              </div>
-            )
-          ) : previewMedia.showImage ? (
-            previewMedia.imageUrl ? (
-              <div className={`rounded-md mb-3 border border-gray-200 overflow-hidden bg-gray-50 ${mediaBoxClassBySize[previewSize]}`}>
-                <img src={previewMedia.imageUrl} alt="Post image" className="w-full h-full object-cover" />
-              </div>
-            ) : (
-              <div
-                className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}
-              >
-                No image available
-              </div>
-            )
-          ) : null}
+          {(() => {
+            const showVid = previewMedia.showVideo;
+            if (showVid) {
+              return isPlayableVideo(previewMedia.videoUrl) ? (
+                <div className={`rounded-md mb-3 border border-gray-200 overflow-hidden flex items-center justify-center bg-black/5 ${mediaBoxClassBySize[previewSize]}`}>
+                  <video key={previewMedia.videoUrl} src={previewMedia.videoUrl} controls className="w-full h-full object-cover" />
+                </div>
+              ) : (
+                <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
+                  {previewMedia.videoUrl ? "Video URL isn't a direct .mp4/.webm/.mov/.m4v — preview not available" : "No video URL provided"}
+                </div>
+              );
+            }
+            if (previewMedia.showImage) {
+              return previewMedia.imageUrl ? (
+                <div className={`rounded-md mb-3 border border-gray-200 overflow-hidden bg-gray-50 ${mediaBoxClassBySize[previewSize]}`}>
+                  <img src={previewMedia.imageUrl} alt="Post image" className="w-full h-full object-cover" />
+                </div>
+              ) : (
+                <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
+                  No image available
+                </div>
+              );
+            }
+            return null;
+          })()}
 
           <div className="text-base font-medium text-gray-900 whitespace-pre-wrap">
             {title?.trim() ? title : <span className="text-gray-400">Title will appear here…</span>}
           </div>
-
           <div className="mt-2 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
             {description?.trim() ? description : <span className="text-gray-400">Description will appear here…</span>}
           </div>
@@ -1164,17 +1172,11 @@ export default function PublishPost() {
           <div className="relative z-10 w-[92vw] max-w-md rounded-xl bg-white shadow-2xl border border-gray-200 p-5">
             <div className="flex items-start justify-between">
               <h2 className="text-lg font-semibold">Schedule this post</h2>
-              <button
-                className="text-gray-400 hover:text-gray-600"
-                onClick={() => setShowSchedule(false)}
-                aria-label="Close"
-              >
-                ✕
-              </button>
+              <button className="text-gray-400 hover:text-gray-600" onClick={() => setShowSchedule(false)} aria-label="Close">✕</button>
             </div>
 
             <p className="text-center mt-2">Can you add if you want to post to another time zone just adjust it accordingly.</p>
-
+            
             <div className="mt-4">
               <label className="text-sm font-medium text-gray-700">Date &amp; time</label>
               <input
@@ -1187,52 +1189,24 @@ export default function PublishPost() {
             </div>
 
             <div className="mt-5 flex items-center justify-end gap-3">
-              <button
-                className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100"
-                onClick={() => setShowSchedule(false)}
-              >
+              <button className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100" onClick={() => setShowSchedule(false)}>
                 Cancel
               </button>
               <button
-                className={`px-4 py-2 rounded-md text-white ${
-                  approveStatus === "posting" ? "bg-teal-300 cursor-not-allowed" : "bg-teal-600 hover:bg-teal-700"
-                }`}
+                className={`px-4 py-2 rounded-md text-white ${approveStatus === "posting" ? "bg-teal-300 cursor-not-allowed" : "bg-teal-600 hover:bg-teal-700"}`}
                 disabled={approveStatus === "posting"}
                 onClick={() => {
                   setScheduleErr(null);
-
-                  if (!enabledMap[selectedPlatform]) {
-                    setScheduleErr("This platform is not connected.");
-                    return;
-                  }
+                  if (!enabledMap[selectedPlatform]) { setScheduleErr("This platform is not connected."); return; }
                   if (selectedPlatform === "Reals") {
-                    if (reelsPlatform === "facebook" && !reelsFbEnabled) {
-                      setScheduleErr("Facebook Reels is not connected.");
-                      return;
-                    }
-                    if (reelsPlatform === "instagram" && !reelsIgEnabled) {
-                      setScheduleErr("Instagram Reels is not connected.");
-                      return;
-                    }
+                    if (reelsPlatform === "facebook" && !reelsFbEnabled) { setScheduleErr("Facebook Reels is not connected."); return; }
+                    if (reelsPlatform === "instagram" && !reelsIgEnabled) { setScheduleErr("Instagram Reels is not connected."); return; }
                   }
-
-                  if (!scheduledAtLocal) {
-                    setScheduleErr("Please pick a date & time.");
-                    return;
-                  }
-
+                  if (!scheduledAtLocal) { setScheduleErr("Please pick a date & time."); return; }
                   const iso = localInputToISO(scheduledAtLocal);
-                  if (!iso) {
-                    setScheduleErr("Invalid date/time.");
-                    return;
-                  }
-
+                  if (!iso) { setScheduleErr("Invalid date/time."); return; }
                   const when = new Date(iso).getTime();
-                  if (isNaN(when) || when <= Date.now() + 60 * 1000) {
-                    setScheduleErr("Please pick a time at least 1 minute in the future.");
-                    return;
-                  }
-
+                  if (isNaN(when) || when <= Date.now() + 60 * 1000) { setScheduleErr("Please pick a time at least 1 minute in the future."); return; }
                   setApproveStatus("posting");
                   void approve(iso);
                 }}
