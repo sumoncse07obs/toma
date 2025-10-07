@@ -464,32 +464,31 @@ export default function PublishPost() {
   }, [id]);
 
   /* ------------------------ load settings + connections ------------------------ */
-  useEffect(() => {
-    let cancelled = false;
-    async function loadAll() {
-      setSettingsLoading(true);
-      setSettingsError(null);
-      try {
-        // ✅ Your routes:
-        // GET /settings (authenticated)
-        // GET /social/connections (authenticated)
-        const [s, c] = await Promise.allSettled([
-          api<any>("/settings"),
-          api<any>("/social/connections"),
-        ]);
-        if (!cancelled) {
-          if (s.status === "fulfilled") setSettings(s.value?.data ?? s.value ?? null);
-          if (c.status === "fulfilled") setConnections(c.value?.data ?? c.value ?? null);
-        }
-      } catch (e: any) {
-        if (!cancelled) setSettingsError(e?.message || "Failed to load settings");
-      } finally {
-        if (!cancelled) setSettingsLoading(false);
+// Load settings + connections (authenticated)
+useEffect(() => {
+  let cancelled = false;
+  async function loadAll() {
+    setSettingsLoading(true);
+    setSettingsError(null);
+    try {
+      const [s, c] = await Promise.allSettled([
+        api<any>("/settings"),            // ✅ correct route
+        api<any>("/social/connections"),  // ✅ optional, but useful
+      ]);
+      if (!cancelled) {
+        if (s.status === "fulfilled") setSettings(s.value?.data ?? s.value ?? null);
+        if (c.status === "fulfilled") setConnections(c.value?.data ?? c.value ?? null);
       }
+    } catch (e: any) {
+      if (!cancelled) setSettingsError(e?.message || "Failed to load settings");
+    } finally {
+      if (!cancelled) setSettingsLoading(false);
     }
-    loadAll();
-    return () => { cancelled = true; };
-  }, []);
+  }
+  loadAll();
+  return () => { cancelled = true; };
+}, []);
+
 
   // After settings load, if current platform is disabled, jump to first enabled
   useEffect(() => {
