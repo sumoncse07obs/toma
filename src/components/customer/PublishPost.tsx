@@ -78,7 +78,7 @@ type CustomerSettings = {
 
 type SocialConnection = {
   id: number | string;
-  provider: string;   // e.g. 'facebook', 'facebook_page', 'instagram', 'x', 'twitter', 'tiktok', 'youtube', 'linkedin_page', 'linkedin_personal', 'threads'
+  provider: string;
   kind?: string | null;
   meta?: any;
 };
@@ -238,7 +238,6 @@ function toList(v?: string[] | string | null): string[] {
   return s.split(",").map((x) => x.trim()).filter(Boolean);
 }
 
-// Build enable map from /social/connections (preferred)
 function computeFromConnections(conns: SocialConnection[] | null | undefined) {
   const map = {
     Facebook: false,
@@ -275,12 +274,11 @@ function computeFromConnections(conns: SocialConnection[] | null | undefined) {
 
   map["Facebook"] = hasFb || hasFbPage;
   map["Instagram"] = hasIg;
-  map["Reals"] = hasFbPage || hasIg; // Reels needs FB Page or IG business
+  map["Reals"] = hasFbPage || hasIg;
 
   return map;
 }
 
-// Fallback from /settings fields
 function computeFromSettings(s: CustomerSettings | null) {
   const fbPages = toList(s?.facebook_page_ids);
   const hasFacebookAny = !!(s?.facebook_profile_id || fbPages.length > 0);
@@ -308,14 +306,12 @@ function computeFromSettings(s: CustomerSettings | null) {
   };
 }
 
-// Final enable map (optimistic while loading; OR of connections + settings)
 function computeEnabledPlatforms(
   loaded: boolean,
   connMap: ReturnType<typeof computeFromConnections>,
   setMap: ReturnType<typeof computeFromSettings>
 ) {
   if (!loaded) {
-    // optimistic: everything enabled while loading
     return {
       Facebook: true,
       Instagram: true,
@@ -328,7 +324,6 @@ function computeEnabledPlatforms(
       "YouTube Short": true,
     };
   }
-  // Merge: if connections say it's on OR settings have the id => enabled
   const out: any = {};
   for (const k of Object.keys(setMap) as (keyof typeof setMap)[]) {
     out[k] = Boolean((connMap as any)[k] || (setMap as any)[k]);
@@ -464,31 +459,30 @@ export default function PublishPost() {
   }, [id]);
 
   /* ------------------------ load settings + connections ------------------------ */
-// Load settings + connections (authenticated)
-useEffect(() => {
-  let cancelled = false;
-  async function loadAll() {
-    setSettingsLoading(true);
-    setSettingsError(null);
-    try {
-      const [s, c] = await Promise.allSettled([
-        api<any>("/settings"),            // ✅ correct route
-        api<any>("/social/connections"),  // ✅ optional, but useful
-      ]);
-      if (!cancelled) {
-        if (s.status === "fulfilled") setSettings(s.value?.data ?? s.value ?? null);
-        if (c.status === "fulfilled") setConnections(c.value?.data ?? c.value ?? null);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAll() {
+      setSettingsLoading(true);
+      setSettingsError(null);
+      try {
+        // ✅ EXACTLY how you call it: /settings?customer_id=#
+        const [s, c] = await Promise.allSettled([
+          api<any>(`/settings?customer_id=${encodeURIComponent(customerId)}`),
+          api<any>("/social/connections"),
+        ]);
+        if (!cancelled) {
+          if (s.status === "fulfilled") setSettings(s.value?.data ?? s.value ?? null);
+          if (c.status === "fulfilled") setConnections(c.value?.data ?? c.value ?? null);
+        }
+      } catch (e: any) {
+        if (!cancelled) setSettingsError(e?.message || "Failed to load settings");
+      } finally {
+        if (!cancelled) setSettingsLoading(false);
       }
-    } catch (e: any) {
-      if (!cancelled) setSettingsError(e?.message || "Failed to load settings");
-    } finally {
-      if (!cancelled) setSettingsLoading(false);
     }
-  }
-  loadAll();
-  return () => { cancelled = true; };
-}, []);
-
+    loadAll();
+    return () => { cancelled = true; };
+  }, [customerId]);
 
   // After settings load, if current platform is disabled, jump to first enabled
   useEffect(() => {
@@ -826,7 +820,7 @@ useEffect(() => {
     };
 
     if (scheduledAtIso) {
-      body.scheduled_at = scheduledAtIso; // backend interprets as UTC ISO
+      body.scheduled_at = scheduledAtIso;
     }
 
     try {
