@@ -1241,7 +1241,6 @@ const visiblePlatforms = useMemo(() => {
                     setScheduleErr("Please pick a time at least 1 minute in the future.");
                     return;
                   }
-
                   // UI feedback immediately; approve() also sets this but we flip it early for snappier UX
                   setApproveStatus("posting");
                   void approve(iso);
@@ -1250,7 +1249,6 @@ const visiblePlatforms = useMemo(() => {
               >
                 {approveStatus === "posting" ? "Posting…" : "Approve & Schedule"}
               </button>
-
             </div>
           </div>
         </div>
