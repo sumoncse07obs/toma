@@ -221,6 +221,34 @@ function nowUtcIsoSeconds() {
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}Z`;
 }
 
+/* ===================== Customer Settings types/helpers ===================== */
+// ===== Replace the previous CustomerSettings type with this =====
+type CustomerSettings = {
+  blotato_facebook_id?: string | null;
+  blotato_facebook_page_ids?: string[] | string | null;
+
+  blotato_instagram_id?: string | null;
+  blotato_threads_id?: string | null;
+  blotato_twitter_id?: string | null;   // X/Twitter
+  blotato_tiktok_id?: string | null;
+
+  // NOTE: your API spells it "linkeidin", so we mirror that here
+  blotato_linkeidin_id?: string | null;
+  blotato_linkeidin_page_ids?: string[] | string | null;
+
+  blotato_youtube_id?: string | null;
+  blotato_pinterest_id?: string | null;
+};
+
+// keep your hasId helper as-is, or use this robust version
+function hasId(v: unknown): boolean {
+  if (!v) return false;
+  if (Array.isArray(v)) return v.some(x => String(x ?? "").trim() !== "");
+  const s = String(v).trim();
+  if (!s) return false;
+  return s.split(",").map(x => x.trim()).filter(Boolean).length > 0;
+}
+
 /* =============================== Component =============================== */
 export default function PublishPost() {
   const { id } = useParams<{ id: string }>();
@@ -281,8 +309,6 @@ export default function PublishPost() {
   const [latestLogPollMs, setLatestLogPollMs] = useState<number>(5000);
 
   const customerId = useMemo(() => getCustomerIdFromAuth(), []);
-  const platforms = Object.keys(FIELD_MAP);
-
   const platformKey = useMemo(
     () => normalizePlatform(selectedPlatform, reelsPlatform),
     [selectedPlatform, reelsPlatform]
@@ -365,6 +391,7 @@ export default function PublishPost() {
       setVideoSaveError(err?.message || "Failed to save video URL");
     }
   }
+
   useEffect(() => {
     if (!record?.id) return;
     const trimmed = (videoUrl ?? "").trim();
@@ -392,13 +419,6 @@ export default function PublishPost() {
     setDescription(newContent);
   }, [selectedPlatform, postType, reelsPlatform, record]);
 
-  const pickPlatform = (p: string) => {
-    setSelectedPlatform(p);
-    if (p === "Reals") setReelsPlatform("facebook");
-    const allowed = allowedPostTypes(p);
-    setPostType((prev) => (allowed.includes(prev) ? prev : allowed[0]));
-  };
-
   const previewMedia = useMemo(() => {
     const img = record?.image_url || "";
     const vid = (videoUrl || record?.video_url || "").trim();
@@ -409,6 +429,137 @@ export default function PublishPost() {
       videoUrl: vid,
     };
   }, [postType, selectedPlatform, record?.image_url, record?.video_url, videoUrl]);
+
+  /* -------------------- Settings load & platform availability -------------------- */
+  const [settings, setSettings] = useState<CustomerSettings | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState<boolean>(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSettings(customerIdNum: number) {
+      setSettingsLoading(true);
+      setSettingsError(null);
+
+      // Pull token explicitly and inject into BOTH requests.
+      const token = localStorage.getItem(TOKEN_KEY) || "";
+      const authHeaders = {
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
+      try {
+        let js: any;
+
+        // Try /settings/{id} first
+        try {
+          js = await api<any>(`/settings/${customerIdNum}`, {
+            headers: authHeaders,
+          });
+        } catch {
+          // Fallback: /settings?customer_id={id}
+          const q = new URLSearchParams({ customer_id: String(customerIdNum) });
+          js = await api<any>(`/settings?${q.toString()}`, {
+            headers: authHeaders,
+          });
+        }
+
+        const data = js?.data ?? js;
+        if (!cancelled) setSettings(data || {});
+      } catch (e: any) {
+        if (!cancelled) setSettingsError(e?.message || "Failed to load settings");
+      } finally {
+        if (!cancelled) setSettingsLoading(false);
+      }
+    }
+
+    if (customerId) loadSettings(customerId);
+    return () => { cancelled = true; };
+  }, [customerId]);
+
+
+// ===== Replace the enabled memo with this =====
+const enabled = useMemo(() => {
+  const s = settings || {};
+
+  const facebookOn =
+    hasId(s.blotato_facebook_id) || hasId(s.blotato_facebook_page_ids);
+
+  const instagramOn = hasId(s.blotato_instagram_id);
+  const threadsOn   = hasId(s.blotato_threads_id);
+  const xOn         = hasId(s.blotato_twitter_id);
+  const tiktokOn    = hasId(s.blotato_tiktok_id);
+
+  // NOTE the "linkeidin" spelling here to match your payload
+  const linkedinOn =
+    hasId(s.blotato_linkeidin_id) || hasId(s.blotato_linkeidin_page_ids);
+
+  const youtubeShortOn = hasId(s.blotato_youtube_id);
+  const pinterestOn    = hasId(s.blotato_pinterest_id);
+
+  // Reels available if either FB or IG is connected
+  const reelsOn = facebookOn || instagramOn;
+
+  return {
+    facebookOn,
+    instagramOn,
+    threadsOn,
+    xOn,
+    tiktokOn,
+    linkedinOn,
+    youtubeShortOn,
+    reelsOn,
+    pinterestOn,
+  };
+}, [settings]);
+
+
+  const visiblePlatforms = useMemo(() => {
+    const order = Object.keys(FIELD_MAP);
+    return order.filter((p) => {
+      if (p === "Facebook") return enabled.facebookOn;
+      if (p === "Instagram") return enabled.instagramOn;
+      if (p === "Threads") return enabled.threadsOn;
+      if (p === "Twitter/X") return enabled.xOn;
+      if (p === "Reals") return enabled.reelsOn;
+      if (p === "Tick Tok") return enabled.tiktokOn;
+      if (p === "Linkedin Business" || p === "Linkedin Personal") return enabled.linkedinOn;
+      if (p === "YouTube Short") return enabled.youtubeShortOn;
+      // If you add Pinterest to FIELD_MAP later:
+      // if (p === "Pinterest") return enabled.pinterestOn;
+      return true;
+    });
+  }, [enabled]);
+
+  // If current selection is no longer visible, switch to first available
+  useEffect(() => {
+    if (!visiblePlatforms.includes(selectedPlatform)) {
+      const first = visiblePlatforms[0];
+      if (first) setSelectedPlatform(first);
+    }
+  }, [visiblePlatforms, selectedPlatform]);
+
+  // When on Reels, if chosen reelsPlatform is not available, switch to the other (or leave page hidden anyway)
+  useEffect(() => {
+    if (selectedPlatform !== "Reals") return;
+    if (reelsPlatform === "facebook" && !enabled.facebookOn && enabled.instagramOn) {
+      setReelsPlatform("instagram");
+    } else if (reelsPlatform === "instagram" && !enabled.instagramOn && enabled.facebookOn) {
+      setReelsPlatform("facebook");
+    }
+  }, [selectedPlatform, reelsPlatform, enabled.facebookOn, enabled.instagramOn]);
+
+  const pickPlatform = (p: string) => {
+    setSelectedPlatform(p);
+    if (p === "Reals") {
+      // pick first available reels sub-platform
+      if (enabled.facebookOn) setReelsPlatform("facebook");
+      else if (enabled.instagramOn) setReelsPlatform("instagram");
+    }
+    const allowed = allowedPostTypes(p);
+    setPostType((prev) => (allowed.includes(prev) ? prev : allowed[0]));
+  };
 
   /* -------------- load latest log (uses final_status/publicUrl) -------------- */
   useEffect(() => {
@@ -789,7 +940,13 @@ export default function PublishPost() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
         {/* Left: platforms */}
         <div className="space-y-2">
-          {platforms.map((p) => {
+          {visiblePlatforms.length === 0 && (
+            <div className="text-sm text-gray-500">
+              {settingsLoading ? "Loading settings…" : "No platforms enabled for this customer."}
+              {settingsError && <div className="text-xs text-red-600 mt-1">{settingsError}</div>}
+            </div>
+          )}
+          {visiblePlatforms.map((p) => {
             const active = p === selectedPlatform;
             return (
               <button
@@ -826,14 +983,29 @@ export default function PublishPost() {
           {/* Radios */}
           {selectedPlatform === "Reals" ? (
             <div className="space-y-2">
-              <label className="flex items-center gap-2">
-                <input type="radio" checked={reelsPlatform === "facebook"} onChange={() => setReelsPlatform("facebook")} />
-                Facebook
-              </label>
-              <label className="flex items-center gap-2">
-                <input type="radio" checked={reelsPlatform === "instagram"} onChange={() => setReelsPlatform("instagram")} />
-                Instagram
-              </label>
+              {enabled.facebookOn && (
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={reelsPlatform === "facebook"}
+                    onChange={() => setReelsPlatform("facebook")}
+                  />
+                  Facebook
+                </label>
+              )}
+              {enabled.instagramOn && (
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={reelsPlatform === "instagram"}
+                    onChange={() => setReelsPlatform("instagram")}
+                  />
+                  Instagram
+                </label>
+              )}
+              {!enabled.facebookOn && !enabled.instagramOn && (
+                <div className="text-xs text-gray-500">No Reels accounts enabled in settings.</div>
+              )}
             </div>
           ) : (
             <div className="space-y-2">
@@ -1019,21 +1191,8 @@ export default function PublishPost() {
             </div>
 
             <p className="text-sm text-gray-600 mt-2">
-              Choose a future date &amp; time. The picker shows <strong>your local/system time</strong>.
+              Can you add if you want to post to another time zone just adjust it accordingly.
             </p>
-
-            {/* Current times for comparison 
-            <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
-              <div>
-                Current UTC (ISO-8601):{" "}
-                <span className="font-mono">{nowUtcIso}</span>
-              </div>
-              <div className="mt-1">
-                Your local now:{" "}
-                <span className="font-mono">{new Date().toLocaleString()}</span>
-                <p className="text-center mt-2">Can you add if you want to post to another time zone just adjust it accordingly.</p>
-              </div>
-            </div>*/}
 
             <div className="mt-4">
               <label className="text-sm font-medium text-gray-700">Date &amp; time</label>
