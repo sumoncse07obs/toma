@@ -483,23 +483,21 @@ export default function PublishPost() {
 const enabled = useMemo(() => {
   const s = settings || {};
 
-  const facebookOn =
-    hasId(s.blotato_facebook_id) || hasId(s.blotato_facebook_page_ids);
+  const facebookOn        = hasId(s.blotato_facebook_id) || hasId(s.blotato_facebook_page_ids);
+  const instagramOn       = hasId(s.blotato_instagram_id);
+  const threadsOn         = hasId(s.blotato_threads_id);
+  const xOn               = hasId(s.blotato_twitter_id);
+  const tiktokOn          = hasId(s.blotato_tiktok_id);
 
-  const instagramOn = hasId(s.blotato_instagram_id);
-  const threadsOn   = hasId(s.blotato_threads_id);
-  const xOn         = hasId(s.blotato_twitter_id);
-  const tiktokOn    = hasId(s.blotato_tiktok_id);
+  // Split LinkedIn into Personal (member) vs Business (page)
+  const linkedinPersonalOn = hasId(s.blotato_linkeidin_id);           // personal (member) account
+  const linkedinPageOn     = hasId(s.blotato_linkeidin_page_ids);     // page(s)
+  // keep a combined flag only if you need it elsewhere:
+  // const linkedinOn = linkedinPersonalOn || linkedinPageOn;
 
-  // NOTE the "linkeidin" spelling here to match your payload
-  const linkedinOn =
-    hasId(s.blotato_linkeidin_id) || hasId(s.blotato_linkeidin_page_ids);
-
-  const youtubeShortOn = hasId(s.blotato_youtube_id);
-  const pinterestOn    = hasId(s.blotato_pinterest_id);
-
-  // Reels available if either FB or IG is connected
-  const reelsOn = facebookOn || instagramOn;
+  const youtubeShortOn    = hasId(s.blotato_youtube_id);
+  const reelsOn           = facebookOn || instagramOn;
+  const pinterestOn       = hasId(s.blotato_pinterest_id);
 
   return {
     facebookOn,
@@ -507,7 +505,8 @@ const enabled = useMemo(() => {
     threadsOn,
     xOn,
     tiktokOn,
-    linkedinOn,
+    linkedinPersonalOn,
+    linkedinPageOn,
     youtubeShortOn,
     reelsOn,
     pinterestOn,
@@ -515,22 +514,28 @@ const enabled = useMemo(() => {
 }, [settings]);
 
 
-  const visiblePlatforms = useMemo(() => {
-    const order = Object.keys(FIELD_MAP);
-    return order.filter((p) => {
-      if (p === "Facebook") return enabled.facebookOn;
-      if (p === "Instagram") return enabled.instagramOn;
-      if (p === "Threads") return enabled.threadsOn;
-      if (p === "Twitter/X") return enabled.xOn;
-      if (p === "Reals") return enabled.reelsOn;
-      if (p === "Tick Tok") return enabled.tiktokOn;
-      if (p === "Linkedin Business" || p === "Linkedin Personal") return enabled.linkedinOn;
-      if (p === "YouTube Short") return enabled.youtubeShortOn;
-      // If you add Pinterest to FIELD_MAP later:
-      // if (p === "Pinterest") return enabled.pinterestOn;
-      return true;
-    });
-  }, [enabled]);
+const visiblePlatforms = useMemo(() => {
+  const order = Object.keys(FIELD_MAP);
+  return order.filter((p) => {
+    if (p === "Facebook") return enabled.facebookOn;
+    if (p === "Instagram") return enabled.instagramOn;
+    if (p === "Threads") return enabled.threadsOn;
+    if (p === "Twitter/X") return enabled.xOn;
+    if (p === "Reals") return enabled.reelsOn;
+    if (p === "Tick Tok") return enabled.tiktokOn;
+
+    // Split logic here:
+    if (p === "Linkedin Business") return enabled.linkedinPageOn;
+    if (p === "Linkedin Personal") return enabled.linkedinPersonalOn;
+
+    if (p === "YouTube Short") return enabled.youtubeShortOn;
+    // if you later add Pinterest to FIELD_MAP:
+    // if (p === "Pinterest") return enabled.pinterestOn;
+
+    return true;
+  });
+}, [enabled]);
+
 
   // If current selection is no longer visible, switch to first available
   useEffect(() => {
