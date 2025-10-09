@@ -52,15 +52,21 @@ function authHeader(): HeadersInit {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
-function getCustomerIdFromAuth(): number {
-  const u: any = currentUser?.() ?? null;
-  return (
-    u?.customer_id ??
-    u?.customer?.id ??
-    u?.profile?.customer_id ??
-    u?.company?.customer_id ??
-    1
-  );
+async function getCustomerIdFromAuth(): Promise<number> {
+  const response = await fetch(`${API_BASE_URL}/customers/me`, {
+    method: "GET",
+    headers: { ...baseJsonHeaders, ...authHeader() },
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch customer data");
+  }
+
+  const { data } = await response.json();
+  //console.log("Fetched customer data:", data); // Log to verify the structure
+
+  // Assuming customer_id is part of the response
+  return data.customer_id; // Make sure the response has customer_id
 }
 
 function formatDuration(ms: number) {
@@ -104,6 +110,21 @@ export default function NewLaunchContents() {
 
   const isBusy = loading;
   const navigate = useNavigate();
+
+  const [customerId, setCustomerId] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Fetch customerId when component mounts
+    const fetchCustomerId = async () => {
+      try {
+        const id = await getCustomerIdFromAuth();
+        setCustomerId(id); // Save customerId in state
+      } catch (error) {
+        console.error("Failed to fetch customer ID:", error);
+      }
+    };
+    fetchCustomerId();
+  }, []);
 
   useEffect(() => {
     if (loading) {
@@ -253,7 +274,7 @@ export default function NewLaunchContents() {
 
     const startedAt = Date.now();
     try {
-      const customer_id = getCustomerIdFromAuth();
+      const customerId = await getCustomerIdFromAuth(); // Fetch customer_id from backend
 
       if (USES_CONTENT) {
         // LAUNCH: only launch_content (no topic/keywords)
@@ -261,7 +282,7 @@ export default function NewLaunchContents() {
         if (!text) throw new Error("Please paste launch content in the textarea.");
 
         const body = {
-          customer_id,
+          customer_id: customerId,
           prompt_for: CONTEXT, // "launch"
           launch_content: text,
           reset: true,
@@ -297,10 +318,10 @@ export default function NewLaunchContents() {
         const scriptFromStart = (json.outputs?.video_script ?? "").trim();
 
         if (newId) {
-          await generateImageForId(customer_id, newId);
+          await generateImageForId(customerId, newId);
         }
         if (newId && scriptFromStart.length > 0) {
-          await generateVideoForId(customer_id, newId, scriptFromStart);
+          await generateVideoForId(customerId, newId, scriptFromStart);
         }
       } else {
         // BLOG/YOUTUBE: URL flow preserved
@@ -308,7 +329,7 @@ export default function NewLaunchContents() {
         if (!url) throw new Error("Please enter a valid URL.");
 
         const body = {
-          customer_id,
+          customer_id: customerId,
           url,
           reset: true,
           prompt_for: CONTEXT,
@@ -344,10 +365,10 @@ export default function NewLaunchContents() {
         const scriptFromStart = (json.outputs?.video_script ?? "").trim();
 
         if (newId) {
-          await generateImageForId(customer_id, newId);
+          await generateImageForId(customerId, newId);
         }
         if (newId && scriptFromStart.length > 0) {
-          await generateVideoForId(customer_id, newId, scriptFromStart);
+          await generateVideoForId(customerId, newId, scriptFromStart);
         }
       }
     } catch (e: any) {
@@ -380,6 +401,9 @@ export default function NewLaunchContents() {
       <h1 className="text-xl font-semibold mb-6">
         Toma <span className="font-bold">{titleNoun}</span> Automation
       </h1>
+
+      {/* Display the customer ID here */}
+      <p>Customer# {customerId}</p>
 
       <div className="relative w-full max-w-6xl">
         {isBusy && (

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { currentUser } from "@/auth";
 
-/* ========= CONFIG: change this once per page copy ========= */
+// CONFIG: change this once per page copy
 const CONTEXT: "blog" | "youtube" | "topic" | "launch" = "blog";
 
 /* ========= Types ========= */
@@ -12,7 +12,6 @@ type GenOutputs = {
   short_summary?: string | null;
   video_script?: string | null;
   image_url?: string | null;
-
   threads_title?: string | null;
   threads_content?: string | null;
   threads_video_title?: string | null;
@@ -53,16 +52,23 @@ function authHeader(): HeadersInit {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
-function getCustomerIdFromAuth(): number {
-  const u: any = currentUser?.() ?? null;
-  return (
-    u?.customer_id ??
-    u?.customer?.id ??
-    u?.profile?.customer_id ??
-    u?.company?.customer_id ??
-    1
-  );
+async function getCustomerIdFromAuth(): Promise<number> {
+  const response = await fetch(`${API_BASE_URL}/customers/me`, {
+    method: "GET",
+    headers: { ...baseJsonHeaders, ...authHeader() },
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch customer data");
+  }
+
+  const { data } = await response.json();
+  //console.log("Fetched customer data:", data); // Log to verify the structure
+
+  // Assuming customer_id is part of the response
+  return data.customer_id; // Make sure the response has customer_id
 }
+
 
 function formatDuration(ms: number) {
   const totalSec = Math.floor(ms / 1000);
@@ -75,7 +81,7 @@ function titleCase(s: string) {
   return s.slice(0, 1).toUpperCase() + s.slice(1);
 }
 
-export default function NewContextContents() {
+export default function NewBlogContents() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [imgSrcUrl, setImgSrcUrl] = useState("");
   const [vidSrcUrl, setVidSrcUrl] = useState("");
@@ -99,6 +105,21 @@ export default function NewContextContents() {
 
   const isBusy = loading;
   const navigate = useNavigate();
+
+  const [customerId, setCustomerId] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Fetch customerId when component mounts
+    const fetchCustomerId = async () => {
+      try {
+        const id = await getCustomerIdFromAuth();
+        setCustomerId(id); // Save customerId in state
+      } catch (error) {
+        console.error("Failed to fetch customer ID:", error);
+      }
+    };
+    fetchCustomerId();
+  }, []);
 
   useEffect(() => {
     if (loading) {
@@ -132,7 +153,6 @@ export default function NewContextContents() {
         {
           method: "POST",
           headers: { ...baseJsonHeaders, ...authHeader() },
-          // 👇 tell backend which PromptSetting row to use
           body: JSON.stringify({ prompt_for: CONTEXT }),
         }
       );
@@ -157,13 +177,11 @@ export default function NewContextContents() {
         data?.data?.url ??
         null;
 
-      // Update UI
       if (typeof newUrl === "string" && newUrl) {
         setOut((prev) => ({ ...prev, image_url: newUrl }));
         setImgSrcUrl(newUrl);
       }
 
-      // Persist image_url (safe even if backend already saved it)
       if (typeof newUrl === "string" && newUrl && generationId) {
         await fetch(`${API_BASE_URL}/content-generations/${generationId}`, {
           method: "PUT",
@@ -188,7 +206,6 @@ export default function NewContextContents() {
       setVidGenErr(null);
       setVidGenLoading(true);
 
-      // If you want to force a script, include it in body; otherwise backend will read gen->video_script
       const resp = await fetch(
         `${API_BASE_URL}/customers/${customerId}/contents/${generationId}/make-video`,
         {
@@ -218,13 +235,11 @@ export default function NewContextContents() {
       const jobId = (data as any)?.job_id ?? null;
       const status = (data as any)?.status ?? null;
 
-      // Update UI
       if (typeof videoUrl === "string" && videoUrl) {
         setVidSrcUrl(videoUrl);
         setOut((prev) => ({ ...prev }));
       }
 
-      // Persist job + status (+ url if present)
       const payload: Record<string, any> = {};
       if (jobId) payload.blotato_video_id = jobId;
       if (status) payload.blotato_video_status = status;
@@ -245,7 +260,7 @@ export default function NewContextContents() {
   }
 
   /** ========= Start pipeline: then image → video ========= */
-  async function handleStartFromContext() {
+  const handleStartFromContext = async () => {
     setErr(null);
     setOut({});
     setGenId(null);
@@ -257,11 +272,13 @@ export default function NewContextContents() {
       const url = sourceUrl.trim();
       if (!url) throw new Error("Please enter a valid URL.");
 
+      const customerId = await getCustomerIdFromAuth(); // Fetch customer_id from backend
+
       const body = {
-        customer_id: getCustomerIdFromAuth(),
+        customer_id: customerId,
         url,
         reset: true,
-        prompt_for: CONTEXT, // 👈 required by backend to pick correct prompts
+        prompt_for: CONTEXT,
       };
 
       const res = await fetch(`${API_BASE_URL}/generate-contents`, {
@@ -281,10 +298,9 @@ export default function NewContextContents() {
         throw new Error(msg);
       }
 
-      const json = (await res.json()) as StartResponse; // { id, message, outputs }
+      const json = (await res.json()) as StartResponse;
       setOut(json.outputs || {});
 
-      // capture id
       let newId: number | null = null;
       if (json.id !== undefined && json.id !== null) {
         const n = Number(json.id);
@@ -292,17 +308,14 @@ export default function NewContextContents() {
         setGenId(newId);
       }
 
-      // grab the script returned by start (to eliminate timing issues)
       const scriptFromStart = (json.outputs?.video_script ?? "").trim();
 
-      // === 1) Generate Image
       if (newId) {
-        await generateImageForId(body.customer_id, newId);
+        await generateImageForId(customerId, newId);
       }
 
-      // === 2) Immediately Generate Video (only if we have an id and a script)
       if (newId && scriptFromStart.length > 0) {
-        await generateVideoForId(body.customer_id, newId, scriptFromStart);
+        await generateVideoForId(customerId, newId, scriptFromStart);
       }
     } catch (e: any) {
       setErr(e?.message || "Something went wrong.");
@@ -311,15 +324,13 @@ export default function NewContextContents() {
       setLastDurationMs(duration);
       setLoading(false);
     }
-  }
+  };
 
   const handleGoNext = () => {
     if (!genId) return;
-    // dynamic route based on context, e.g. /customer/blog/view/:id
     navigate(`/customer/${CONTEXT}/view/${genId}`);
   };
 
-  // Shared readiness gate for "Click Here" and "Next"
   const canProceed = !!genId && !loading && !imgGenLoading && !vidGenLoading;
 
   const titleNoun = titleCase(CONTEXT);
@@ -332,10 +343,12 @@ export default function NewContextContents() {
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-10 px-4">
-      {/* Title */}
       <h1 className="text-xl font-semibold mb-6">
         Toma <span className="font-bold">{titleNoun}</span> Automation
       </h1>
+
+      {/* Display the customer ID here */}
+      <p>Customer# {customerId}</p>
 
       <div className="relative w-full max-w-6xl">
         {isBusy && (
