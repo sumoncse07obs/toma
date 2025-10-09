@@ -1249,9 +1249,11 @@ const visiblePlatforms = useMemo(() => {
               >
                 {approveStatus === "posting" ? "Posting…" : "Approve & Schedule"}
               </button>
+
             </div>
           </div>
         </div>
+        
       )}
     </div>
   );
