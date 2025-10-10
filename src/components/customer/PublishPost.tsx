@@ -66,7 +66,20 @@ type ContentGeneration = {
 /* ========================= API base (robust) ========================= */
 const RAW_BASE = String(import.meta.env.VITE_API_BASE || "").replace(/\/+$/g, "");
 const API_BASE = RAW_BASE.endsWith("/api") ? RAW_BASE : `${RAW_BASE}/api`;
+
+const API_BASE_URL = `${import.meta.env.VITE_API_BASE}/api`;
 const TOKEN_KEY = "toma_token";
+
+const baseJsonHeaders: HeadersInit = {
+  "Content-Type": "application/json",
+  Accept: "application/json",
+};
+
+function authHeader(): HeadersInit {
+  const t = localStorage.getItem(TOKEN_KEY);
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 
 /** normalize URL and keep one slash */
 function norm(path: string) {
@@ -98,9 +111,21 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (ct.includes("application/json") ? await res.json() : (undefined as any)) as T;
 }
 
-function getCustomerIdFromAuth(): number {
-  const u: any = currentUser?.() ?? null;
-  return u?.customer_id ?? u?.customer?.id ?? u?.profile?.customer_id ?? u?.company?.customer_id ?? 1;
+async function getCustomerIdFromAuth(): Promise<number> {
+  const response = await fetch(`${API_BASE_URL}/customers/me`, {
+    method: "GET",
+    headers: { ...baseJsonHeaders, ...authHeader() },
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch customer data");
+  }
+
+  const { data } = await response.json();
+  //console.log("Fetched customer data:", data); // Log to verify the structure
+
+  // Assuming customer_id is part of the response
+  return data.customer_id; // Make sure the response has customer_id
 }
 
 /* ===================== Status normalization + polling helpers ===================== */
@@ -308,7 +333,7 @@ export default function PublishPost() {
   const [nextPollInMs, setNextPollInMs] = useState<number | null>(null);
   const [latestLogPollMs, setLatestLogPollMs] = useState<number>(5000);
 
-  const customerId = useMemo(() => getCustomerIdFromAuth(), []);
+  //const customerId = useMemo(() => getCustomerIdFromAuth(), []);
   const platformKey = useMemo(
     () => normalizePlatform(selectedPlatform, reelsPlatform),
     [selectedPlatform, reelsPlatform]
@@ -333,6 +358,20 @@ export default function PublishPost() {
 
   // ====== UTC clock state (for modal) ======
   const [nowUtcIso, setNowUtcIso] = useState<string>(nowUtcIsoSeconds());
+  const [customerId, setCustomerId] = useState<number | null>(null);
+  
+    useEffect(() => {
+      // Fetch customerId when component mounts
+      const fetchCustomerId = async () => {
+        try {
+          const id = await getCustomerIdFromAuth();
+          setCustomerId(id); // Save customerId in state
+        } catch (error) {
+          console.error("Failed to fetch customer ID:", error);
+        }
+      };
+      fetchCustomerId();
+    }, []);
 
   // Tick UTC clock while modal is open
   useEffect(() => {
@@ -895,7 +934,7 @@ const visiblePlatforms = useMemo(() => {
 
       {/* Header */}
       <h1 className="text-xl font-semibold mb-2">{TITLE_BY_CONTEXT[context]}</h1>
-
+      <p>Customer# {customerId}</p>
       {/* Back + Refresh */}
       <div className="mb-6 flex items-center gap-3">
         <button
