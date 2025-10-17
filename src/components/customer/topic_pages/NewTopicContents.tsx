@@ -356,8 +356,8 @@ export default function NewTopicContents() {
         Toma <span className="font-bold">{titleNoun}</span> Automation
       </h1>
 
-      {/* Display the customer ID here */}
-      <p>Customer# {customerId}</p>
+      {/* Display the customer ID here 
+      <p>Customer# {customerId}</p>*/}
 
       <div className="relative w-full max-w-6xl">
         {isBusy && (

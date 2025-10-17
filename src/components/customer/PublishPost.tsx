@@ -80,7 +80,6 @@ function authHeader(): HeadersInit {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
-
 /** normalize URL and keep one slash */
 function norm(path: string) {
   return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`.replace(/([^:]\/)\/+/g, "$1");
@@ -122,10 +121,7 @@ async function getCustomerIdFromAuth(): Promise<number> {
   }
 
   const { data } = await response.json();
-  //console.log("Fetched customer data:", data); // Log to verify the structure
-
-  // Assuming customer_id is part of the response
-  return data.customer_id; // Make sure the response has customer_id
+  return data.customer_id; // Make sure backend returns this
 }
 
 /* ===================== Status normalization + polling helpers ===================== */
@@ -136,8 +132,8 @@ function normalizeStatus(s: string | null | undefined): "queued" | "posted" | "f
   return "queued";
 }
 
-const BASE_POLL_MS = 4000;      // start at 4s
-const MAX_POLL_MS  = 20000;     // cap at 20s
+const BASE_POLL_MS = 4000; // start at 4s
+const MAX_POLL_MS = 20000; // cap at 20s
 const MAX_TOTAL_MS = 10 * 60 * 1000; // give up after 10 min
 
 function nextDelay(prev: number) {
@@ -151,49 +147,62 @@ type FieldKeys = { title?: keyof ContentGeneration; content?: keyof ContentGener
 
 const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: FieldKeys }> = {
   Facebook: {
-    text:  { title: "facebook_title",         content: "facebook_content" },
-    image: { title: "facebook_title",         content: "facebook_content" },
-    video: { title: "facebook_video_title",   content: "facebook_video_content" },
+    text: { title: "facebook_title", content: "facebook_content" },
+    image: { title: "facebook_title", content: "facebook_content" },
+    video: { title: "facebook_video_title", content: "facebook_video_content" },
   },
   Instagram: {
-    text:  { title: "instagram_title",        content: "instagram_content" },
-    image: { title: "instagram_title",        content: "instagram_content" },
-    video: { title: "instagram_video_title",  content: "instagram_video_content" },
+    text: { title: "instagram_title", content: "instagram_content" },
+    image: { title: "instagram_title", content: "instagram_content" },
+    video: { title: "instagram_video_title", content: "instagram_video_content" },
   },
   Threads: {
-    text:  { title: "threads_title",          content: "threads_content" },
-    image: { title: "threads_title",          content: "threads_content" },
-    video: { title: "threads_video_title",    content: "threads_video_content" },
+    text: { title: "threads_title", content: "threads_content" },
+    image: { title: "threads_title", content: "threads_content" },
+    video: { title: "threads_video_title", content: "threads_video_content" },
   },
   "Twitter/X": {
-    text:  { title: "x_title",                content: "x_content" },
-    image: { title: "x_title",                content: "x_content" },
-    video: { title: "x_video_title",          content: "x_video_content" },
+    text: { title: "x_title", content: "x_content" },
+    image: { title: "x_title", content: "x_content" },
+    video: { title: "x_video_title", content: "x_video_content" },
   },
   Reals: { text: {}, image: {}, video: {} },
   "Tick Tok": {
-    text:  { title: "tiktok_video_title",     content: "tiktok_video_content" },
-    image: { title: "tiktok_video_title",     content: "tiktok_video_content" },
-    video: { title: "tiktok_video_title",     content: "tiktok_video_content" },
+    text: { title: "tiktok_video_title", content: "tiktok_video_content" },
+    image: { title: "tiktok_video_title", content: "tiktok_video_content" },
+    video: { title: "tiktok_video_title", content: "tiktok_video_content" },
   },
   "Linkedin Business": {
-    text:  { title: "linkedin_title",         content: "linkedin_content" },
-    image: { title: "linkedin_title",         content: "linkedin_content" },
-    video: { title: "linkedin_video_title",   content: "linkedin_video_content" },
+    text: { title: "linkedin_title", content: "linkedin_content" },
+    image: { title: "linkedin_title", content: "linkedin_content" },
+    video: { title: "linkedin_video_title", content: "linkedin_video_content" },
   },
   "Linkedin Personal": {
-    text:  { title: "linkedin_title",         content: "linkedin_content" },
-    image: { title: "linkedin_title",         content: "linkedin_content" },
-    video: { title: "linkedin_video_title",   content: "linkedin_video_content" },
+    text: { title: "linkedin_title", content: "linkedin_content" },
+    image: { title: "linkedin_title", content: "linkedin_content" },
+    video: { title: "linkedin_video_title", content: "linkedin_video_content" },
   },
   "YouTube Short": {
-    text:  { title: "youtube_video_title",    content: "youtube_video_description" },
-    image: { title: "youtube_video_title",    content: "youtube_video_description" },
-    video: { title: "youtube_video_title",    content: "youtube_video_description" },
+    text: { title: "youtube_video_title", content: "youtube_video_description" },
+    image: { title: "youtube_video_title", content: "youtube_video_description" },
+    video: { title: "youtube_video_title", content: "youtube_video_description" },
   },
 };
 
-const isPlayableVideo = (url?: string | null) => !!url && /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url);
+const isPlayableVideo = (url?: string | null) =>
+  !!url && /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url);
+
+/* ===== NEW: blotato host check ===== */
+function isBlotatoHosted(u?: string | null) {
+  if (!u) return false;
+  try {
+    const host = new URL(u).hostname.toLowerCase();
+    return host.endsWith("blotato.io") || host.endsWith("blotato.com");
+  } catch {
+    return false;
+  }
+}
+
 const mediaBoxClassBySize: Record<PreviewSize, string> = { sm: "w-64 h-40", md: "w-96 h-56", lg: "w-full h-72" };
 
 function normalizePlatform(ui: string, reelsPlatform: "facebook" | "instagram"): string {
@@ -229,12 +238,11 @@ function toLocalInputValue(d: Date) {
   return `${y}-${m}-${day}T${h}:${min}`;
 }
 function localInputToISO(v: string) {
-  // Treat the value as local time, then convert to ISO (UTC)
   const dt = new Date(v.replace(" ", "T"));
   return isNaN(dt.getTime()) ? null : dt.toISOString();
 }
 
-// ---- UTC clock helpers (seconds precision, no milliseconds) ----
+// ---- UTC clock helpers ----
 function nowUtcIsoSeconds() {
   const d = new Date();
   const yyyy = d.getUTCFullYear();
@@ -247,17 +255,16 @@ function nowUtcIsoSeconds() {
 }
 
 /* ===================== Customer Settings types/helpers ===================== */
-// ===== Replace the previous CustomerSettings type with this =====
 type CustomerSettings = {
   blotato_facebook_id?: string | null;
   blotato_facebook_page_ids?: string[] | string | null;
 
   blotato_instagram_id?: string | null;
   blotato_threads_id?: string | null;
-  blotato_twitter_id?: string | null;   // X/Twitter
+  blotato_twitter_id?: string | null; // X/Twitter
   blotato_tiktok_id?: string | null;
 
-  // NOTE: your API spells it "linkeidin", so we mirror that here
+  // NOTE: API uses "linkeidin" spelling
   blotato_linkeidin_id?: string | null;
   blotato_linkeidin_page_ids?: string[] | string | null;
 
@@ -265,13 +272,12 @@ type CustomerSettings = {
   blotato_pinterest_id?: string | null;
 };
 
-// keep your hasId helper as-is, or use this robust version
 function hasId(v: unknown): boolean {
   if (!v) return false;
-  if (Array.isArray(v)) return v.some(x => String(x ?? "").trim() !== "");
+  if (Array.isArray(v)) return v.some((x) => String(x ?? "").trim() !== "");
   const s = String(v).trim();
   if (!s) return false;
-  return s.split(",").map(x => x.trim()).filter(Boolean).length > 0;
+  return s.split(",").map((x) => x.trim()).filter(Boolean).length > 0;
 }
 
 /* =============================== Component =============================== */
@@ -284,8 +290,8 @@ export default function PublishPost() {
   const context = useMemo<"blog" | "youtube" | "topic" | "launch">(() => {
     const p = pathname.toLowerCase();
     if (p.includes("/customer/youtube/") || p.includes("/youtube/")) return "youtube";
-    if (p.includes("/customer/topic/")   || p.includes("/topic/"))   return "topic";
-    if (p.includes("/customer/launch/")  || p.includes("/launch/"))  return "launch";
+    if (p.includes("/customer/topic/") || p.includes("/topic/")) return "topic";
+    if (p.includes("/customer/launch/") || p.includes("/launch/")) return "launch";
     return "blog";
   }, [pathname]);
 
@@ -333,7 +339,6 @@ export default function PublishPost() {
   const [nextPollInMs, setNextPollInMs] = useState<number | null>(null);
   const [latestLogPollMs, setLatestLogPollMs] = useState<number>(5000);
 
-  //const customerId = useMemo(() => getCustomerIdFromAuth(), []);
   const platformKey = useMemo(
     () => normalizePlatform(selectedPlatform, reelsPlatform),
     [selectedPlatform, reelsPlatform]
@@ -359,19 +364,19 @@ export default function PublishPost() {
   // ====== UTC clock state (for modal) ======
   const [nowUtcIso, setNowUtcIso] = useState<string>(nowUtcIsoSeconds());
   const [customerId, setCustomerId] = useState<number | null>(null);
-  
-    useEffect(() => {
-      // Fetch customerId when component mounts
-      const fetchCustomerId = async () => {
-        try {
-          const id = await getCustomerIdFromAuth();
-          setCustomerId(id); // Save customerId in state
-        } catch (error) {
-          console.error("Failed to fetch customer ID:", error);
-        }
-      };
-      fetchCustomerId();
-    }, []);
+
+  useEffect(() => {
+    // Fetch customerId when component mounts
+    const fetchCustomerId = async () => {
+      try {
+        const id = await getCustomerIdFromAuth();
+        setCustomerId(id);
+      } catch (error) {
+        console.error("Failed to fetch customer ID:", error);
+      }
+    };
+    fetchCustomerId();
+  }, []);
 
   // Tick UTC clock while modal is open
   useEffect(() => {
@@ -407,7 +412,9 @@ export default function PublishPost() {
       }
     }
     if (id) load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   /* -------------------------- persist video_url -------------------------- */
@@ -435,7 +442,9 @@ export default function PublishPost() {
     if (!record?.id) return;
     const trimmed = (videoUrl ?? "").trim();
     if (!trimmed || trimmed === (record.video_url ?? "").trim()) return;
-    const t = setTimeout(() => { void persistVideoUrl(trimmed); }, 700);
+    const t = setTimeout(() => {
+      void persistVideoUrl(trimmed);
+    }, 700);
     return () => clearTimeout(t);
   }, [videoUrl, record?.id, record?.video_url]);
 
@@ -444,16 +453,17 @@ export default function PublishPost() {
     if (!record) return;
     let keys: FieldKeys | undefined;
     if (selectedPlatform === "Reals") {
-      keys = reelsPlatform === "facebook"
-        ? { title: "facebook_reels_title", content: "facebook_reels_content" }
-        : { title: "instagram_reels_title", content: "instagram_reels_content" };
+      keys =
+        reelsPlatform === "facebook"
+          ? { title: "facebook_reels_title", content: "facebook_reels_content" }
+          : { title: "instagram_reels_title", content: "instagram_reels_content" };
     } else {
       const map = FIELD_MAP[selectedPlatform];
       if (!map) return;
       keys = map[postType];
     }
-    const newTitle = keys?.title ? (record[keys.title] as string | null) ?? "" : "";
-    const newContent = keys?.content ? (record[keys.content] as string | null) ?? "" : "";
+    const newTitle = keys?.title ? ((record as any)[keys.title] as string | null) ?? "" : "";
+    const newContent = keys?.content ? ((record as any)[keys.content] as string | null) ?? "" : "";
     setTitle(newTitle);
     setDescription(newContent);
   }, [selectedPlatform, postType, reelsPlatform, record]);
@@ -481,7 +491,6 @@ export default function PublishPost() {
       setSettingsLoading(true);
       setSettingsError(null);
 
-      // Pull token explicitly and inject into BOTH requests.
       const token = localStorage.getItem(TOKEN_KEY) || "";
       const authHeaders = {
         Accept: "application/json",
@@ -514,69 +523,63 @@ export default function PublishPost() {
     }
 
     if (customerId) loadSettings(customerId);
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [customerId]);
 
+  // Enabled platforms
+  const enabled = useMemo(() => {
+    const s = settings || {};
 
-// ===== Replace the enabled memo with this =====
-const enabled = useMemo(() => {
-  const s = settings || {};
+    const facebookOn = hasId(s.blotato_facebook_id) || hasId(s.blotato_facebook_page_ids);
+    const instagramOn = hasId(s.blotato_instagram_id);
+    const threadsOn = hasId(s.blotato_threads_id);
+    const xOn = hasId(s.blotato_twitter_id);
+    const tiktokOn = hasId(s.blotato_tiktok_id);
 
-  const facebookOn        = hasId(s.blotato_facebook_id) || hasId(s.blotato_facebook_page_ids);
-  const instagramOn       = hasId(s.blotato_instagram_id);
-  const threadsOn         = hasId(s.blotato_threads_id);
-  const xOn               = hasId(s.blotato_twitter_id);
-  const tiktokOn          = hasId(s.blotato_tiktok_id);
+    // Split LinkedIn into Personal (member) vs Business (page)
+    const linkedinPersonalOn = hasId(s.blotato_linkeidin_id);
+    const linkedinPageOn = hasId(s.blotato_linkeidin_page_ids);
 
-  // Split LinkedIn into Personal (member) vs Business (page)
-  const linkedinPersonalOn = hasId(s.blotato_linkeidin_id);           // personal (member) account
-  const linkedinPageOn     = hasId(s.blotato_linkeidin_page_ids);     // page(s)
-  // keep a combined flag only if you need it elsewhere:
-  // const linkedinOn = linkedinPersonalOn || linkedinPageOn;
+    const youtubeShortOn = hasId(s.blotato_youtube_id);
+    const reelsOn = facebookOn || instagramOn;
+    const pinterestOn = hasId(s.blotato_pinterest_id);
 
-  const youtubeShortOn    = hasId(s.blotato_youtube_id);
-  const reelsOn           = facebookOn || instagramOn;
-  const pinterestOn       = hasId(s.blotato_pinterest_id);
+    return {
+      facebookOn,
+      instagramOn,
+      threadsOn,
+      xOn,
+      tiktokOn,
+      linkedinPersonalOn,
+      linkedinPageOn,
+      youtubeShortOn,
+      reelsOn,
+      pinterestOn,
+    };
+  }, [settings]);
 
-  return {
-    facebookOn,
-    instagramOn,
-    threadsOn,
-    xOn,
-    tiktokOn,
-    linkedinPersonalOn,
-    linkedinPageOn,
-    youtubeShortOn,
-    reelsOn,
-    pinterestOn,
-  };
-}, [settings]);
+  const visiblePlatforms = useMemo(() => {
+    const order = Object.keys(FIELD_MAP);
+    return order.filter((p) => {
+      if (p === "Facebook") return enabled.facebookOn;
+      if (p === "Instagram") return enabled.instagramOn;
+      if (p === "Threads") return enabled.threadsOn;
+      if (p === "Twitter/X") return enabled.xOn;
+      if (p === "Reals") return enabled.reelsOn;
+      if (p === "Tick Tok") return enabled.tiktokOn;
 
+      if (p === "Linkedin Business") return enabled.linkedinPageOn;
+      if (p === "Linkedin Personal") return enabled.linkedinPersonalOn;
 
-const visiblePlatforms = useMemo(() => {
-  const order = Object.keys(FIELD_MAP);
-  return order.filter((p) => {
-    if (p === "Facebook") return enabled.facebookOn;
-    if (p === "Instagram") return enabled.instagramOn;
-    if (p === "Threads") return enabled.threadsOn;
-    if (p === "Twitter/X") return enabled.xOn;
-    if (p === "Reals") return enabled.reelsOn;
-    if (p === "Tick Tok") return enabled.tiktokOn;
+      if (p === "YouTube Short") return enabled.youtubeShortOn;
+      // if (p === "Pinterest") return enabled.pinterestOn;
+      return true;
+    });
+  }, [enabled]);
 
-    // Split logic here:
-    if (p === "Linkedin Business") return enabled.linkedinPageOn;
-    if (p === "Linkedin Personal") return enabled.linkedinPersonalOn;
-
-    if (p === "YouTube Short") return enabled.youtubeShortOn;
-    // if you later add Pinterest to FIELD_MAP:
-    // if (p === "Pinterest") return enabled.pinterestOn;
-
-    return true;
-  });
-}, [enabled]);
-
-
-  // If current selection is no longer visible, switch to first available
+  // Keep selected in sync
   useEffect(() => {
     if (!visiblePlatforms.includes(selectedPlatform)) {
       const first = visiblePlatforms[0];
@@ -584,7 +587,6 @@ const visiblePlatforms = useMemo(() => {
     }
   }, [visiblePlatforms, selectedPlatform]);
 
-  // When on Reels, if chosen reelsPlatform is not available, switch to the other (or leave page hidden anyway)
   useEffect(() => {
     if (selectedPlatform !== "Reals") return;
     if (reelsPlatform === "facebook" && !enabled.facebookOn && enabled.instagramOn) {
@@ -597,7 +599,6 @@ const visiblePlatforms = useMemo(() => {
   const pickPlatform = (p: string) => {
     setSelectedPlatform(p);
     if (p === "Reals") {
-      // pick first available reels sub-platform
       if (enabled.facebookOn) setReelsPlatform("facebook");
       else if (enabled.instagramOn) setReelsPlatform("instagram");
     }
@@ -628,7 +629,7 @@ const visiblePlatforms = useMemo(() => {
           return;
         }
 
-        const finalStatus = String(log.final_status || "").toLowerCase(); // 'published' | 'failed' | ''
+        const finalStatus = String(log.final_status || "").toLowerCase();
         if (finalStatus === "published") {
           setPublishStatus("posted");
           setPublicUrl(log.publicUrl ?? null);
@@ -700,12 +701,13 @@ const visiblePlatforms = useMemo(() => {
           const subId: string | null = log.provider_post_id ?? null;
           if (subId) {
             setLastSubmissionId(subId);
-            // kick a first check
             void fetchStatusOnce(subId);
             return;
           }
         }
-      } catch {/* ignore */}
+      } catch {
+        /* ignore */
+      }
       const next = Math.min(latestLogPollMs * 1.5, 15000);
       setLatestLogPollMs(next);
       t = window.setTimeout(pollLatest, next);
@@ -752,9 +754,7 @@ const visiblePlatforms = useMemo(() => {
     const controller = new AbortController();
 
     function shouldPollNow() {
-      return typeof document !== "undefined"
-        ? document.visibilityState === "visible"
-        : true;
+      return typeof document !== "undefined" ? document.visibilityState === "visible" : true;
     }
 
     async function pollOnce(): Promise<boolean> {
@@ -827,9 +827,33 @@ const visiblePlatforms = useMemo(() => {
     };
   }, [lastSubmissionId, publishStatus]);
 
+  /* ===== NEW: flag when current media is NOT hosted on Blotato ===== */
+  const nonBlotatoMedia = useMemo(() => {
+    const pt = effectivePostType;
+    if (pt === "image") {
+      const img = (record?.image_url || "").trim();
+      return !!img && !isBlotatoHosted(img);
+    }
+    if (pt === "video") {
+      const vid = (videoUrl || record?.video_url || "").trim();
+      return !!vid && !isBlotatoHosted(vid);
+    }
+    return false;
+  }, [effectivePostType, record?.image_url, record?.video_url, videoUrl]);
+
   /* -------------------------- Approve & Publish -------------------------- */
   async function approve(scheduledAtIso?: string) {
     if (!record?.id) return;
+
+    // BLOCK posting if media isn’t on Blotato
+    if (nonBlotatoMedia) {
+      setApproveStatus("error");
+      setApproveError(
+        "We can’t post media that isn’t hosted on Blotato (database.blotato.io). Please upload via Blotato and use that URL."
+      );
+      return;
+    }
+
     setApproveStatus("posting");
     setApproveError(null);
 
@@ -922,19 +946,15 @@ const visiblePlatforms = useMemo(() => {
         <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] flex items-center justify-center">
           <div className="bg-white rounded-xl shadow-2xl p-6 w-80 text-center">
             <div className="mx-auto mb-3 h-6 w-6 rounded-full border-2 border-gray-300 border-t-transparent animate-spin" />
-            <div className="text-sm text-gray-800 font-medium">
-              Please wait — getting post status from Blotato…
-            </div>
-            <div className="text-[11px] text-gray-500 mt-2">
-              This can take 1–3 minutes for video posts.
-            </div>
+            <div className="text-sm text-gray-800 font-medium">Please wait — getting post status from Blotato…</div>
+            <div className="text-[11px] text-gray-500 mt-2">This can take 1–3 minutes for video posts.</div>
           </div>
         </div>
       )}
 
       {/* Header */}
       <h1 className="text-xl font-semibold mb-2">{TITLE_BY_CONTEXT[context]}</h1>
-      <p>Customer# {customerId}</p>
+
       {/* Back + Refresh */}
       <div className="mb-6 flex items-center gap-3">
         <button
@@ -972,13 +992,23 @@ const visiblePlatforms = useMemo(() => {
       </div>
 
       {/* Save status row */}
-      <div className="w-full max-w-4xl mb-6 text-xs min-h-5">
+      <div className="w-full max-w-4xl mb-2 text-xs min-h-5">
         {savingVideo === "saving" && <span className="text-amber-600">Saving…</span>}
         {savingVideo === "saved" && <span className="text-green-600">Saved</span>}
         {savingVideo === "error" && (
           <span className="text-red-600">Save failed{videoSaveError ? `: ${videoSaveError}` : ""}</span>
         )}
       </div>
+
+      {/* ===== NEW: small hint if video is non-Blotato and posting video ===== */}
+      {effectivePostType === "video" &&
+        (videoUrl || record?.video_url) &&
+        !isBlotatoHosted((videoUrl || record?.video_url || "").trim()) && (
+          <div className="w-full max-w-4xl mb-4 text-xs text-red-600">
+            Only media hosted on <span className="font-mono">*.blotato.io</span> or{" "}
+            <span className="font-mono">*.blotato.com</span> can be posted.
+          </div>
+        )}
 
       {/* Main content */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
@@ -997,8 +1027,9 @@ const visiblePlatforms = useMemo(() => {
                 key={p}
                 onClick={() => pickPlatform(p)}
                 className={`w-full py-2 rounded-md border ${
-                  active ? "bg-blue-100 border-blue-400 text-blue-600 font-medium"
-                         : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
+                  active
+                    ? "bg-blue-100 border-blue-400 text-blue-600 font-medium"
+                    : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
                 }`}
               >
                 {p}
@@ -1077,6 +1108,16 @@ const visiblePlatforms = useMemo(() => {
 
         {/* Right: actions + STATUS PANEL */}
         <div className="flex flex-col justify-between space-y-4">
+          {/* ===== NEW: Banner when media is not hosted on Blotato ===== */}
+          {nonBlotatoMedia && (
+            <div className="w-full rounded-md border border-red-300 bg-red-50 text-red-700 p-3 text-sm">
+              We can’t post media that isn’t hosted on Blotato.
+              <br />
+              Please use a URL from <span className="font-mono">database.blotato.io</span> (or another{" "}
+              <span className="font-mono">*.blotato.io/.com</span> host).
+            </div>
+          )}
+
           <button
             className="w-full bg-orange-500 text-white py-2 rounded-md hover:bg-orange-600"
             onClick={() => {
@@ -1092,8 +1133,12 @@ const visiblePlatforms = useMemo(() => {
           </button>
 
           <button
-            className={`w-full text-white py-2 rounded-md ${approveStatus === "posting" ? "bg-teal-300" : "bg-teal-500 hover:bg-teal-600"}`}
-            disabled={approveStatus === "posting"}
+            className={`w-full text-white py-2 rounded-md ${
+              approveStatus === "posting" || nonBlotatoMedia
+                ? "bg-teal-300 cursor-not-allowed"
+                : "bg-teal-500 hover:bg-teal-600"
+            }`}
+            disabled={approveStatus === "posting" || nonBlotatoMedia}
             onClick={() => void approve()}
           >
             {approveStatus === "posting" ? "Submitting…" : "Approve & Publish"}
@@ -1102,15 +1147,24 @@ const visiblePlatforms = useMemo(() => {
           <div className="rounded-md border border-gray-200 p-3 text-sm bg-gray-50">
             <div className="flex items-center justify-between">
               <span className="text-gray-600">Publish status</span>
-              <span className={`font-medium ${
-                publishStatus === "posted" ? "text-green-600" :
-                publishStatus === "failed" ? "text-red-600" :
-                publishStatus === "queued" ? "text-amber-600" : "text-gray-500"
-              }`}>
-                {publishStatus === "idle" ? "—" :
-                 publishStatus === "queued" ? "Queued" :
-                 publishStatus === "posted" ? "Published" :
-                 "Failed"}
+              <span
+                className={`font-medium ${
+                  publishStatus === "posted"
+                    ? "text-green-600"
+                    : publishStatus === "failed"
+                    ? "text-red-600"
+                    : publishStatus === "queued"
+                    ? "text-amber-600"
+                    : "text-gray-500"
+                }`}
+              >
+                {publishStatus === "idle"
+                  ? "—"
+                  : publishStatus === "queued"
+                  ? "Queued"
+                  : publishStatus === "posted"
+                  ? "Published"
+                  : "Failed"}
               </span>
             </div>
             <div className="flex items-center justify-between mt-1">
@@ -1140,19 +1194,17 @@ const visiblePlatforms = useMemo(() => {
               {!lastSubmissionId && <>Waiting for submission id…</>}
             </div>
 
-            <a
-              href={logsUrl}
-              className="text-blue-600 hover:underline"
-            >
+            <a href={logsUrl} className="text-blue-600 hover:underline">
               View Publish Logs
             </a>
-
           </div>
 
           <div className="min-h-5 text-xs">
             {approveStatus === "posted" && <span className="text-green-600">Submitted to Blotato.</span>}
             {approveStatus === "error" && (
-              <span className="text-red-600">Publish failed{approveError ? `: ${approveError}` : ""}</span>
+              <span className="text-red-600">
+                Publish failed{approveError ? `: ${approveError}` : ""}{nonBlotatoMedia ? " (Non-Blotato media)" : ""}
+              </span>
             )}
             {publishStatus === "queued" && (
               <span className="text-amber-600">Processing on the platform… video posts may take 1–3 minutes.</span>
@@ -1172,7 +1224,7 @@ const visiblePlatforms = useMemo(() => {
 
             <div className="flex items-center gap-2 text-xs">
               <span className="text-gray-500">Preview size:</span>
-              {(["sm","md","lg"] as const).map((s) => (
+              {(["sm", "md", "lg"] as const).map((s) => (
                 <label key={s} className="flex items-center gap-1 cursor-pointer">
                   <input type="radio" checked={previewSize === s} onChange={() => setPreviewSize(s)} />
                   <span className={previewSize === s ? "font-medium" : ""}>{s.toUpperCase()}</span>
@@ -1183,12 +1235,18 @@ const visiblePlatforms = useMemo(() => {
 
           {previewMedia.showVideo ? (
             isPlayableVideo(previewMedia.videoUrl) ? (
-              <div className={`rounded-md mb-3 border border-gray-200 overflow-hidden flex items-center justify-center bg-black/5 ${mediaBoxClassBySize[previewSize]}`}>
+              <div
+                className={`rounded-md mb-3 border border-gray-200 overflow-hidden flex items-center justify-center bg-black/5 ${mediaBoxClassBySize[previewSize]}`}
+              >
                 <video key={previewMedia.videoUrl} src={previewMedia.videoUrl} controls className="w-full h-full object-cover" />
               </div>
             ) : (
-              <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
-                {previewMedia.videoUrl ? "Video URL isn't a direct .mp4/.webm/.mov/.m4v — preview not available" : "No video URL provided"}
+              <div
+                className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}
+              >
+                {previewMedia.videoUrl
+                  ? "Video URL isn't a direct .mp4/.webm/.mov/.m4v — preview not available"
+                  : "No video URL provided"}
               </div>
             )
           ) : previewMedia.showImage ? (
@@ -1197,7 +1255,9 @@ const visiblePlatforms = useMemo(() => {
                 <img src={previewMedia.imageUrl} alt="Post image" className="w-full h-full object-cover" />
               </div>
             ) : (
-              <div className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}>
+              <div
+                className={`rounded-md mb-3 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-sm ${mediaBoxClassBySize[previewSize]}`}
+              >
                 No image available
               </div>
             )
@@ -1217,10 +1277,7 @@ const visiblePlatforms = useMemo(() => {
       {showSchedule && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setShowSchedule(false)}
-          />
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowSchedule(false)} />
           {/* Dialog */}
           <div className="relative z-10 w-[92vw] max-w-md rounded-xl bg-white shadow-2xl border border-gray-200 p-5">
             <div className="flex items-start justify-between">
@@ -1258,10 +1315,14 @@ const visiblePlatforms = useMemo(() => {
               </button>
               <button
                 className={`px-4 py-2 rounded-md text-white ${
-                  approveStatus === "posting" ? "bg-teal-300 cursor-not-allowed" : "bg-teal-600 hover:bg-teal-700"
+                  approveStatus === "posting" || nonBlotatoMedia
+                    ? "bg-teal-300 cursor-not-allowed"
+                    : "bg-teal-600 hover:bg-teal-700"
                 }`}
-                disabled={approveStatus === "posting"}
+                disabled={approveStatus === "posting" || nonBlotatoMedia}
                 onClick={() => {
+                  if (nonBlotatoMedia) return; // safety
+
                   setScheduleErr(null);
 
                   if (!scheduledAtLocal) {
@@ -1281,15 +1342,12 @@ const visiblePlatforms = useMemo(() => {
                     return;
                   }
 
-                  // UI feedback immediately; approve() also sets this but we flip it early for snappier UX
                   setApproveStatus("posting");
                   void approve(iso);
-                  // on success approve() will setApproveStatus("posted") and setShowSchedule(false)
                 }}
               >
                 {approveStatus === "posting" ? "Posting…" : "Approve & Schedule"}
               </button>
-
             </div>
           </div>
         </div>

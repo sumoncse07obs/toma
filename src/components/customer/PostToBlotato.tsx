@@ -20,26 +20,32 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
   const res = await fetch(url, {
     method: init?.method || "GET",
+    mode: "cors",                         // make intent explicit
+    // credentials: "include",            // uncomment only if you use cookies/Sanctum
     headers: {
       "Content-Type": "application/json",
-      Accept: "application/json",
+      "Accept": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
-    // If using Sanctum cookies:
-    // credentials: "include",
     ...init,
   });
 
+  // If the request was blocked by CORS, fetch throws before here with TypeError.
   if (!res.ok) {
+    // Try to read text for better diagnostics
     const text = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+    throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url}\n${text}`);
   }
 
   const ct = res.headers.get("content-type") || "";
-  if (!ct.includes("application/json")) return undefined as T;
+  if (!ct.includes("application/json")) {
+    // Support 204, or file responses
+    return undefined as T;
+  }
   return (await res.json()) as T;
 }
+
 
 export default function PostToBlotato() {
   const { id } = useParams(); // /blog/posttoblotato/:id
@@ -117,9 +123,12 @@ export default function PostToBlotato() {
       setDone(true);
       toast.success(`${kind === "image" ? "Image" : "Video"} uploaded successfully!`);
     } catch (e: any) {
-      const msg = e?.message || `Failed to upload ${kind}.`;
-      setErr(msg);
-      toast.error(msg);
+        const isCorsBlock = e?.name === "TypeError" && /fetch/i.test(String(e?.message || ""));
+        const msg = isCorsBlock
+          ? "Upload failed due to a CORS block. The API must allow this origin."
+          : (e?.message || `Failed to upload ${kind}.`);
+        setErr(msg);
+        toast.error(msg);
     } finally {
       setPosting(false);
     }
