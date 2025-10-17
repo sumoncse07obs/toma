@@ -365,6 +365,17 @@ export default function PublishPost() {
   const [nowUtcIso, setNowUtcIso] = useState<string>(nowUtcIsoSeconds());
   const [customerId, setCustomerId] = useState<number | null>(null);
 
+  // Build "convert" link from record.prompt_for (fallback to context) + id
+const promptFor = (record as any)?.prompt_for || context; // 'blog' | 'topic' | 'youtube' | 'launch'
+const genId = record?.id ?? (id ? parseInt(id, 10) : null);
+
+// detect if you're under /customer/* (most of your screens are)
+const isCustomerRoute = pathname.toLowerCase().includes("/customer/");
+const rootPrefix = isCustomerRoute ? "/customer" : "";
+
+// ABSOLUTE path so it doesn't append to the current URL
+const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` : "#";
+
   useEffect(() => {
     // Fetch customerId when component mounts
     const fetchCustomerId = async () => {
@@ -849,8 +860,8 @@ export default function PublishPost() {
     if (nonBlotatoMedia) {
       setApproveStatus("error");
       setApproveError(
-        "We can’t post media that isn’t hosted on Blotato (database.blotato.io). Please upload via Blotato and use that URL."
-      );
+         "This image format isn’t supported. Please use the image conversion tool — once it’s done, start using the new URL."
+        );
       return;
     }
 
@@ -1005,10 +1016,15 @@ export default function PublishPost() {
         (videoUrl || record?.video_url) &&
         !isBlotatoHosted((videoUrl || record?.video_url || "").trim()) && (
           <div className="w-full max-w-4xl mb-4 text-xs text-red-600">
-            Only media hosted on <span className="font-mono">*.blotato.io</span> or{" "}
-            <span className="font-mono">*.blotato.com</span> can be posted.
+            This image format isn’t supported. Please use the image conversion tool — once it’s done, start using the new URL.{" "}
+            {genId && (
+              <a href={convertHref} className="underline">
+                click here to convert this
+              </a>
+            )}
           </div>
-        )}
+      )}
+
 
       {/* Main content */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
@@ -1111,12 +1127,15 @@ export default function PublishPost() {
           {/* ===== NEW: Banner when media is not hosted on Blotato ===== */}
           {nonBlotatoMedia && (
             <div className="w-full rounded-md border border-red-300 bg-red-50 text-red-700 p-3 text-sm">
-              We can’t post media that isn’t hosted on Blotato.
-              <br />
-              Please use a URL from <span className="font-mono">database.blotato.io</span> (or another{" "}
-              <span className="font-mono">*.blotato.io/.com</span> host).
+              This image format isn’t supported. Please use the image conversion tool — once it’s done, start using the new URL.&nbsp;
+              {genId && (
+                <a href={convertHref} className="underline">
+                  click here to convert this
+                </a>
+              )}
             </div>
           )}
+
 
           <button
             className="w-full bg-orange-500 text-white py-2 rounded-md hover:bg-orange-600"
@@ -1203,7 +1222,7 @@ export default function PublishPost() {
             {approveStatus === "posted" && <span className="text-green-600">Submitted to Blotato.</span>}
             {approveStatus === "error" && (
               <span className="text-red-600">
-                Publish failed{approveError ? `: ${approveError}` : ""}{nonBlotatoMedia ? " (Non-Blotato media)" : ""}
+                Publish failed{approveError ? `: ${approveError}` : ""}
               </span>
             )}
             {publishStatus === "queued" && (
