@@ -1,14 +1,13 @@
 // src/components/tools/PostToBlotato.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "react-toastify";
 
 const TOKEN_KEY = "toma_token";
-
-// 👉 Set VITE_API_BASE in Vercel (e.g. https://api.yourdomain.com)
 const API_HOST = String(import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 const API = `${API_HOST}/api`;
 
+// ------------ tiny fetch helper ------------
 function norm(path: string) {
   if (!path.startsWith("/")) path = `/${path}`;
   return `${API}${path}`.replace(/([^:]\/)\/+/g, "$1");
@@ -20,36 +19,32 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
   const res = await fetch(url, {
     method: init?.method || "GET",
-    mode: "cors",                         // make intent explicit
-    // credentials: "include",            // uncomment only if you use cookies/Sanctum
+    mode: "cors",
     headers: {
       "Content-Type": "application/json",
-      "Accept": "application/json",
+      Accept: "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
     ...init,
   });
 
-  // If the request was blocked by CORS, fetch throws before here with TypeError.
   if (!res.ok) {
-    // Try to read text for better diagnostics
     const text = await res.text().catch(() => "");
     throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url}\n${text}`);
   }
-
   const ct = res.headers.get("content-type") || "";
-  if (!ct.includes("application/json")) {
-    // Support 204, or file responses
-    return undefined as T;
-  }
-  return (await res.json()) as T;
+  return ct.includes("application/json") ? ((await res.json()) as T) : (undefined as T);
 }
 
+// ------------ types ------------
+type MeResponse = { data: { customer_id: number } };
+type UploadResp = { url?: string; data?: { url?: string }; message?: string };
 
+// ------------ component ------------
 export default function PostToBlotato() {
   const { id } = useParams(); // /blog/posttoblotato/:id
-  const generationId = id ? parseInt(id, 10) : undefined;
+  const generationId = useMemo(() => (id ? parseInt(id, 10) : undefined), [id]);
 
   // Inputs
   const [imgSrc, setImgSrc] = useState("");
@@ -59,19 +54,38 @@ export default function PostToBlotato() {
   const [imgPosting, setImgPosting] = useState(false);
   const [vidPosting, setVidPosting] = useState(false);
 
-  // Done flags (disable Start after success until input changes)
+  // Done flags
   const [imgDone, setImgDone] = useState(false);
   const [vidDone, setVidDone] = useState(false);
 
-  // Outputs
+  // Outputs / errors
   const [imgOut, setImgOut] = useState<string | null>(null);
   const [vidOut, setVidOut] = useState<string | null>(null);
-
-  // Errors
   const [imgErr, setImgErr] = useState<string | null>(null);
   const [vidErr, setVidErr] = useState<string | null>(null);
 
-  // Re-enable Start when user edits input
+  // Customer
+  const [customerId, setCustomerId] = useState<number | null>(null);
+  const [customerErr, setCustomerErr] = useState<string | null>(null);
+
+  // ✅ get customer_id the same way as your other page
+  useEffect(() => {
+    (async () => {
+      try {
+        const me = await api<MeResponse>("/customers/me");
+        const cid = me?.data?.customer_id;
+        if (!cid) throw new Error("No customer_id in /customers/me");
+        setCustomerId(cid);
+      } catch (err: any) {
+        setCustomerErr(
+          "Could not determine customer_id from /customers/me. Make sure you're logged in and the route is under auth."
+        );
+        console.error(err);
+      }
+    })();
+  }, []);
+
+  // reset per-input
   useEffect(() => {
     setImgDone(false);
     setImgOut(null);
@@ -93,23 +107,28 @@ export default function PostToBlotato() {
     const setErr = kind === "image" ? setImgErr : setVidErr;
     const setDone = kind === "image" ? setImgDone : setVidDone;
 
+    if (!customerId) {
+      const msg = "Missing customer_id — /customers/me did not return one.";
+      setErr(msg);
+      toast.error(msg);
+      return;
+    }
+
     try {
       setPosting(true);
       setOut(null);
       setErr(null);
       setDone(false);
 
-      const json = await api<{ url?: string; data?: { url?: string }; message?: string }>(
-        "/blotato/media",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            url: val,
-            kind, // "image" | "video"
-            generation_id: generationId,
-          }),
-        }
-      );
+      const json = await api<UploadResp>("/blotato/media", {
+        method: "POST",
+        body: JSON.stringify({
+          url: val,
+          kind,                    // "image" | "video"
+          generation_id: generationId,
+          customer_id: customerId, // ✅ always pass it
+        }),
+      });
 
       const hosted = json?.url || json?.data?.url;
       if (!hosted) {
@@ -123,27 +142,38 @@ export default function PostToBlotato() {
       setDone(true);
       toast.success(`${kind === "image" ? "Image" : "Video"} uploaded successfully!`);
     } catch (e: any) {
-        const isCorsBlock = e?.name === "TypeError" && /fetch/i.test(String(e?.message || ""));
-        const msg = isCorsBlock
+      const msg = String(e?.message || "");
+      if (msg.includes("HTTP 403") && /Generation does not belong/i.test(msg)) {
+        const friendly = "Forbidden: this generation belongs to a different customer.";
+        setErr(friendly);
+        toast.error(friendly);
+      } else {
+        const isCors = e?.name === "TypeError" && /fetch/i.test(msg);
+        const nice = isCors
           ? "Upload failed due to a CORS block. The API must allow this origin."
-          : (e?.message || `Failed to upload ${kind}.`);
-        setErr(msg);
-        toast.error(msg);
+          : (msg || `Failed to upload ${kind}.`);
+        setErr(nice);
+        toast.error(nice);
+      }
     } finally {
       setPosting(false);
     }
   }
 
-  const imgButtonDisabled =
-    !imgSrc.trim() || imgPosting || !generationId || imgDone;
-  const vidButtonDisabled =
-    !vidSrc.trim() || vidPosting || !generationId || vidDone;
+  const imgButtonDisabled = !imgSrc.trim() || imgPosting || !generationId || imgDone;
+  const vidButtonDisabled = !vidSrc.trim() || vidPosting || !generationId || vidDone;
 
   return (
     <div className="p-4 md:p-6">
       {!generationId && (
         <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-3">
           Missing content generation id in URL. Open this page via <code>/blog/posttoblotato/:id</code>.
+        </div>
+      )}
+
+      {customerErr && (
+        <div className="mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-3">
+          {customerErr}
         </div>
       )}
 
@@ -164,9 +194,7 @@ export default function PostToBlotato() {
             />
             <button
               className={`h-12 rounded-md text-white ${
-                imgButtonDisabled
-                  ? "bg-teal-400 opacity-60 cursor-not-allowed"
-                  : "bg-teal-500 hover:bg-teal-600"
+                imgButtonDisabled ? "bg-teal-400 opacity-60 cursor-not-allowed" : "bg-teal-500 hover:bg-teal-600"
               }`}
               disabled={imgButtonDisabled}
               onClick={() => handleUpload("image")}
@@ -188,9 +216,7 @@ export default function PostToBlotato() {
             />
             <button
               className={`h-12 rounded-md text-white ${
-                vidButtonDisabled
-                  ? "bg-teal-400 opacity-60 cursor-not-allowed" // ✅ fixed typo
-                  : "bg-teal-500 hover:bg-teal-600"
+                vidButtonDisabled ? "bg-teal-400 opacity-60 cursor-not-allowed" : "bg-teal-500 hover:bg-teal-600"
               }`}
               disabled={vidButtonDisabled}
               onClick={() => handleUpload("video")}
@@ -240,6 +266,10 @@ export default function PostToBlotato() {
               <div className="text-xs text-blue-600">Click URL link to see video</div>
             </button>
           )}
+
+          {customerId ? (
+            <p className="text-[11px] text-gray-500 text-center">Using <span className="font-medium">customer_id: {customerId}</span></p>
+          ) : null}
 
           <p className="text-[11px] text-gray-500 pl-1 text-center">**it 4 or 5 min to produce the video**</p>
         </div>
