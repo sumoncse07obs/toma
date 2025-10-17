@@ -64,12 +64,22 @@ export async function login(email: string, password: string): Promise<User> {
 }
 
 export async function logout(): Promise<void> {
-  // Clear first so UI updates
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
-
-  try { await apiCall("/logout", { method: "POST" }); } catch {}
+  const token = localStorage.getItem(TOKEN_KEY);
+  try {
+    await fetch(`${API_BASE_URL}/logout`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+  } catch {} finally {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  }
 }
+
 
 export function isAuthed(): boolean {
   return !!localStorage.getItem(TOKEN_KEY);

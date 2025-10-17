@@ -57,12 +57,22 @@ export async function login(email: string, password: string): Promise<User> {
 
 // Logout function
 export async function logout(): Promise<void> {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  const token = localStorage.getItem(TOKEN_KEY);
   try {
-    await apiCall("/logout", { method: "POST" });
-  } catch { /* ignore */ }
+    await fetch(`${API_BASE_URL}/logout`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+  } catch {} finally {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  }
 }
+
 
 // Check if user is authenticated
 export function isAuthed(): boolean {
