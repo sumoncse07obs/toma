@@ -74,6 +74,7 @@ type PublishLog = {
   provider_post_id: string | null;
   publicUrl: string | null;
   final_status?: string | null;
+  provider_response?: unknown | null; // <-- added (may be absent in list; we fetch on demand)
 };
 
 type Row = {
@@ -103,6 +104,37 @@ function effectiveLogStatus(
   return log.status ?? "queued";
 }
 
+/* ============== provider_response helpers + modal ============== */
+function toObject(x: unknown): any {
+  if (x == null) return null;
+  if (typeof x === "string") {
+    try { return JSON.parse(x); } catch { return { raw: x }; }
+  }
+  return x;
+}
+function prettyJson(x: unknown): string {
+  const o = toObject(x);
+  try { return JSON.stringify(o, null, 2); } catch { return String(x ?? ""); }
+}
+
+function Modal({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative z-10 w-[min(900px,92vw)] max-h-[85vh] bg-white rounded-xl shadow-lg border p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md border border-gray-300 hover:bg-gray-100">Close</button>
+        </div>
+        <div className="overflow-auto">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 /* ========================= The Logs Page ========================= */
 export default function PublishBlogLogs() {
   const navigate = useNavigate();
@@ -116,6 +148,12 @@ export default function PublishBlogLogs() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [autoRefresh, setAutoRefresh] = useState(true);
+
+  // modal state for provider_response
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsIdx, setDetailsIdx] = useState<number | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsErr, setDetailsErr] = useState<string | null>(null);
 
   const intervalRef = useRef<number | null>(null);
 
@@ -220,12 +258,11 @@ export default function PublishBlogLogs() {
       return cp;
     });
     try {
-      let r = rows[rowIdx];
+      const r = rows[rowIdx];
       if (!r) return;
-
       if (!r?.log?.provider_post_id) return;
 
-      const subId = r.log!.provider_post_id!;
+      const subId = r.log.provider_post_id!;
       const js = await api<any>(`/publish/status/${subId}`);
       const ui = normalizeStatus(js?.status);
       const publicUrl = js?.publicUrl ?? null;
@@ -234,8 +271,7 @@ export default function PublishBlogLogs() {
         ...r.log,
         status: ui,
         publicUrl: publicUrl,
-        posted_on:
-          ui === "posted" ? new Date().toISOString() : r.log?.posted_on ?? null,
+        posted_on: ui === "posted" ? new Date().toISOString() : r.log?.posted_on ?? null,
         final_status: r.log?.final_status ?? null,
       };
 
@@ -261,6 +297,47 @@ export default function PublishBlogLogs() {
       cp[idx] = { ...cp[idx], ...patch };
       return cp;
     });
+  }
+
+  /* --------------------- On-demand provider_response (modal) --------------------- */
+  async function openDetails(rowIdx: number) {
+    setDetailsOpen(true);
+    setDetailsIdx(rowIdx);
+    setDetailsErr(null);
+
+    const r = rows[rowIdx];
+    if (!r) return;
+
+    // If provider_response already loaded, just show modal.
+    if (r.log.provider_response != null) {
+      setDetailsLoading(false);
+      return;
+    }
+
+    // Otherwise fetch latest log for this gen+platform+type
+    setDetailsLoading(true);
+    try {
+      const qs = new URLSearchParams({
+        content_generation_id: String(r.gen.id),
+        platform: r.log.platform,
+        post_type: r.log.post_type,
+      }).toString();
+
+      const resp = await api<any>(`/publish/logs/latest?${qs}`);
+      const latest = resp?.data ?? resp;
+
+      const mergedLog: PublishLog = {
+        ...r.log,
+        provider_response: latest?.provider_response ?? null,
+        publicUrl: r.log.publicUrl ?? latest?.publicUrl ?? null,
+      };
+
+      updateRow(rowIdx, { log: mergedLog });
+    } catch (e: any) {
+      setDetailsErr(e?.message || "Failed to load provider response");
+    } finally {
+      setDetailsLoading(false);
+    }
   }
 
   /* ---------------------- Auto-refresh queued statuses ---------------------- */
@@ -402,23 +479,27 @@ export default function PublishBlogLogs() {
                   <td className="px-3 py-2 align-top">
                     {ucfirst(r.log.post_type)}
                   </td>
+
+                  {/* Status → clickable pill to open modal */}
                   <td className="px-3 py-2 align-top">
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded ${badge}`}
+                    <button
+                      onClick={() => openDetails(idx)}
+                      title="View provider response"
+                      className={`cursor-pointer inline-flex items-center px-2 py-0.5 rounded transition
+                        underline underline-offset-2
+                        ${eff === "posted" ? "text-green-700 bg-green-100 hover:bg-green-200"
+                          : eff === "failed" ? "text-red-700 bg-red-100 hover:bg-red-200"
+                          : "text-amber-700 bg-amber-100 hover:bg-amber-200"}`}
                     >
-                      {eff === "posted"
-                        ? "Published"
-                        : eff === "failed"
-                        ? "Failed"
-                        : "Queued"}
-                    </span>
+                      {eff === "posted" ? "Published" : eff === "failed" ? "Failed" : "Queued"}
+                    </button>
                     {r.checking && (
-                      <span className="ml-2 text-xs text-gray-500">
-                        checking…
-                      </span>
+                      <span className="ml-2 text-xs text-gray-500">checking…</span>
                     )}
                   </td>
+
                   <td className="px-3 py-2 align-top">{fmt(r.log.posted_on)}</td>
+
                   <td className="px-3 py-2 align-top">
                     {r.log.publicUrl ? (
                       <a
@@ -433,17 +514,17 @@ export default function PublishBlogLogs() {
                       <span className="text-gray-400">—</span>
                     )}
                   </td>
+
                   <td className="px-3 py-2 align-top">
                     <div className="font-mono text-[11px] break-all text-gray-700">
                       {r.log.provider_post_id || "—"}
                     </div>
                     <div className="text-[10px] text-gray-400">
-                      {r.lastCheckedAt && (
-                        <>last {new Date(r.lastCheckedAt).toLocaleTimeString()}</>
-                      )}
+                      {r.lastCheckedAt && <>last {new Date(r.lastCheckedAt).toLocaleTimeString()}</>}
                       {r.lastRawStatus && <> · raw: {r.lastRawStatus}</>}
                     </div>
                   </td>
+
                   <td className="px-3 py-2 align-top">
                     <div className="flex items-center gap-2">
                       <button
@@ -486,6 +567,30 @@ export default function PublishBlogLogs() {
           </button>
         </div>
       </div>
+
+      {/* Provider response modal */}
+      <Modal
+        open={detailsOpen}
+        onClose={() => { setDetailsOpen(false); setDetailsIdx(null); }}
+        title={
+          detailsIdx != null
+            ? `Provider Response · ${rows[detailsIdx]?.log.platform ?? ""} (${rows[detailsIdx]?.log.post_type ?? ""})`
+            : "Provider Response"
+        }
+      >
+        {detailsLoading && <div className="text-sm text-gray-600">Loading…</div>}
+        {detailsErr && <div className="text-sm text-red-600 mb-2">{detailsErr}</div>}
+
+        {!detailsLoading && !detailsErr && detailsIdx != null && (
+          rows[detailsIdx]?.log?.provider_response ? (
+            <pre className="text-xs bg-gray-50 border rounded-md p-3 overflow-auto">
+              {prettyJson(rows[detailsIdx].log.provider_response)}
+            </pre>
+          ) : (
+            <div className="text-sm text-gray-600">No provider response available.</div>
+          )
+        )}
+      </Modal>
     </div>
   );
 }
