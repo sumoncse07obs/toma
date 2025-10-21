@@ -7,6 +7,7 @@ const RAW_BASE = String(import.meta.env.VITE_API_BASE || "").replace(/\/+$/g, ""
 const API_BASE = RAW_BASE.endsWith("/api") ? RAW_BASE : `${RAW_BASE}/api`;
 const TOKEN_KEY = "toma_token";
 const norm = (p: string) => `${API_BASE}${p.startsWith("/") ? p : `/${p}`}`.replace(/([^:]\/)\/+/g, "$1");
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem(TOKEN_KEY);
   const res = await fetch(norm(path), {
@@ -26,6 +27,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const ct = res.headers.get("content-type") || "";
   return (ct.includes("application/json") ? await res.json() : (undefined as any)) as T;
 }
+
 const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : "—");
 const ucfirst = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
@@ -40,6 +42,7 @@ type Log = {
   posted_on: string | null;
   provider_post_id: string | null; // Submission ID
   publicUrl: string | null;
+  provider_response?: unknown | null; // may be absent in list; we fetch on demand
 };
 
 /* normalize → ui */
@@ -59,6 +62,35 @@ const nextDelay = (d: number) => Math.min(Math.round(d * 1.7) + Math.floor(Math.
 /* fixed 30s cadence for DB-driven rechecks */
 const POLL_MS = 30000;
 
+/* ============== provider_response JSON helpers + modal ============== */
+function toObject(x: unknown): any {
+  if (x == null) return null;
+  if (typeof x === "string") { try { return JSON.parse(x); } catch { return { raw: x }; } }
+  return x;
+}
+function prettyJson(x: unknown): string {
+  const o = toObject(x);
+  try { return JSON.stringify(o, null, 2); } catch { return String(x ?? ""); }
+}
+
+function Modal({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" aria-modal="true" role="dialog" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative z-10 w-[min(900px,92vw)] max-h-[85vh] bg-white rounded-xl shadow-lg border p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md border border-gray-300 hover:bg-gray-100">Close</button>
+        </div>
+        <div className="overflow-auto">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 export default function PublishLogs() {
   const { id } = useParams<{ id: string }>();
   const postId = Number(id);
@@ -71,8 +103,14 @@ export default function PublishLogs() {
 
   // auto-check state per row
   type AutoMeta = { checking: boolean; delay: number; nextAt: number | null; lastRaw?: string | null; };
-  const [auto, setAuto] = useState<Record<number, AutoMeta>>({}); // key = log.id
+  const [auto, setAuto] = useState<Record<number, AutoMeta>>({});
   const [autoOn, setAutoOn] = useState(true);
+
+  // details modal state
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsFor, setDetailsFor] = useState<Log | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsErr, setDetailsErr] = useState<string | null>(null);
 
   const ticker = useRef<number | null>(null);
   const poller = useRef<number | null>(null);
@@ -102,7 +140,6 @@ export default function PublishLogs() {
             lastRaw: null,
           };
         } else {
-          // if it became non-queued, stop auto
           if (effective !== "queued") merged[row.id].nextAt = null;
         }
       }
@@ -138,7 +175,6 @@ export default function PublishLogs() {
     const row = logs[logIndex];
     if (!row?.provider_post_id) return;
 
-    // flag checking
     setAuto(prev => ({ ...prev, [row.id]: { ...(prev[row.id] || { delay: START_DELAY_MS, nextAt: null }), checking: true } }));
 
     try {
@@ -172,7 +208,6 @@ export default function PublishLogs() {
         };
       });
     } catch {
-      // on error, keep backoff schedule moving
       setAuto(prev => {
         const meta = prev[row.id] || { delay: START_DELAY_MS, nextAt: null };
         const d = nextDelay(meta.delay);
@@ -181,9 +216,45 @@ export default function PublishLogs() {
     }
   }
 
+  /* -------------------- on-demand provider_response fetch -------------------- */
+  async function openDetails(row: Log) {
+    setDetailsOpen(true);
+    setDetailsErr(null);
+
+    // If already have payload, just show.
+    if (row.provider_response != null) {
+      setDetailsFor(row);
+      setDetailsLoading(false);
+      return;
+    }
+
+    // Otherwise fetch latest log for this post/platform/type
+    setDetailsLoading(true);
+    try {
+      const qs = new URLSearchParams({
+        content_generation_id: String(postId),
+        platform: row.platform,
+        post_type: row.post_type,
+      }).toString();
+
+      const resp = await api<any>(`/publish/logs/latest?${qs}`);
+      const latest = resp?.data ?? resp;
+
+      const merged: Log = { ...row, provider_response: latest?.provider_response ?? null };
+      setDetailsFor(merged);
+
+      // Patch into table for future instant opens
+      setLogs(prev => prev.map(r => (r.id === row.id ? merged : r)));
+    } catch (e: any) {
+      setDetailsErr(e?.message || "Failed to load provider response");
+      setDetailsFor(row);
+    } finally {
+      setDetailsLoading(false);
+    }
+  }
+
   /* -------------------- global auto-check ticker (per-row backoff) -------------------- */
   useEffect(() => {
-    // clear on unmount
     return () => { if (ticker.current) { clearInterval(ticker.current); ticker.current = null; } };
   }, []);
 
@@ -193,24 +264,21 @@ export default function PublishLogs() {
 
     ticker.current = window.setInterval(async () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-
       const now = Date.now();
-      // loop rows; fire checks that are due
       for (let i = 0; i < logs.length; i++) {
         const r = logs[i];
         const meta = auto[r.id];
         if (!r?.provider_post_id) continue;
 
-        // prefer final_status when present
         const effective =
           r.final_status === "published" ? "posted" :
           r.final_status === "failed" ? "failed" :
           r.status;
 
-        if (effective !== "queued") continue;         // only auto-check queued
-        if (!meta || meta.checking) continue;         // skip if already checking
+        if (effective !== "queued") continue;
+        if (!meta || meta.checking) continue;
         if (meta.nextAt && now >= meta.nextAt) {
-          await checkNow(i);                           // updates both logs[] and auto[]
+          await checkNow(i);
         }
       }
     }, 1000) as unknown as number;
@@ -218,36 +286,29 @@ export default function PublishLogs() {
     return () => { if (ticker.current) { clearInterval(ticker.current); ticker.current = null; } };
   }, [autoOn, logs, auto]);
 
-  /* -------------------- fixed 30s poll: check DB-eligible rows -------------------- */
+  /* -------------------- fixed 30s poll: DB-eligible rows -------------------- */
   useEffect(() => {
-    // clear on unmount
     return () => { if (poller.current) { clearInterval(poller.current); poller.current = null; } };
   }, []);
 
   useEffect(() => {
     if (poller.current) { clearInterval(poller.current); poller.current = null; }
 
-    // always run, independent of autoOn toggle (you said: "on every 30s I want to check...")
     poller.current = window.setInterval(async () => {
       if (isBatchChecking.current) return;
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
 
       isBatchChecking.current = true;
       try {
-        // pick rows with empty final_status AND a provider_post_id
         const targets: number[] = [];
         for (let i = 0; i < logs.length; i++) {
           const r = logs[i];
           const finalEmpty = !r.final_status || r.final_status.trim() === "";
           if (finalEmpty && r.provider_post_id) targets.push(i);
         }
-
-        // sequential checks to avoid rate-limiting
         for (const idx of targets) {
           await checkNow(idx);
         }
-
-        // refresh from DB to capture any new rows or backend-updated fields (e.g., final_status)
         await refreshLogs();
       } catch {
         // swallow polling errors
@@ -257,7 +318,7 @@ export default function PublishLogs() {
     }, POLL_MS) as unknown as number;
 
     return () => { if (poller.current) { clearInterval(poller.current); poller.current = null; } };
-  }, [logs]); // rebind when logs array identity changes
+  }, [logs]);
 
   /* -------------------- derived flags -------------------- */
   const anyAutoActive = useMemo(
@@ -280,7 +341,6 @@ export default function PublishLogs() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* clock icon that animates when auto is running */}
           <span className="inline-flex items-center text-sm text-gray-600">
             <span className={`mr-2 ${anyAutoActive && autoOn ? "animate-pulse" : ""}`} aria-hidden>
               🕒
@@ -314,7 +374,7 @@ export default function PublishLogs() {
               <th className="text-left px-3 py-2">Posted On</th>
               <th className="text-left px-3 py-2">Public URL</th>
               <th className="text-left px-3 py-2">Submission ID</th>
-              <th className="text-left px-3 py-2 w-40">Actions</th>
+              <th className="text-left px-3 py-2 w-48">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -334,8 +394,7 @@ export default function PublishLogs() {
                 : "text-amber-700 bg-amber-100";
 
               const meta = auto[r.id];
-              const nextIn =
-                meta?.nextAt ? Math.max(0, Math.round((meta.nextAt - Date.now()) / 1000)) : null;
+              const nextIn = meta?.nextAt ? Math.max(0, Math.round((meta.nextAt - Date.now()) / 1000)) : null;
 
               return (
                 <tr key={r.id} className="border-top">
@@ -343,10 +402,18 @@ export default function PublishLogs() {
                   <td className="px-3 py-2 align-top">{ucfirst(r.post_type)}</td>
 
                   <td className="px-3 py-2 align-top">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded ${badge}`}>
+                    <button
+                      onClick={() => openDetails(r)}
+                      title="View provider response"
+                      className={`inline-flex items-center px-2 py-0.5 rounded transition
+                        underline-offset-2 underline
+                        ${effective === "posted" ? "text-green-700 bg-green-100 hover:bg-green-200 hover:underline"
+                          : effective === "failed" ? "text-red-700 bg-red-100 hover:bg-red-200 hover:underline"
+                          : "text-amber-700 bg-amber-100 hover:bg-amber-200 hover:underline"}`}
+                    >
                       {effective === "posted" ? "Published" : effective === "failed" ? "Failed" : "Queued"}
-                    </span>
-                    {/* show per-row auto/backoff info if queued */}
+                    </button>
+
                     {effective === "queued" && r.provider_post_id && (
                       <span className="ml-2 text-[11px] text-gray-500">
                         {meta?.checking ? "checking…" : nextIn !== null ? `next ${nextIn}s` : ""}
@@ -390,6 +457,26 @@ export default function PublishLogs() {
           </tbody>
         </table>
       </div>
+
+      {/* Provider response modal */}
+      <Modal
+        open={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        title={`Provider Response${detailsFor ? ` · ${detailsFor.platform} (${detailsFor.post_type})` : ""}`}
+      >
+        {detailsLoading && <div className="text-sm text-gray-600">Loading…</div>}
+        {detailsErr && <div className="text-sm text-red-600 mb-2">{detailsErr}</div>}
+
+        {!detailsLoading && !detailsErr && (
+          detailsFor?.provider_response ? (
+            <pre className="text-xs bg-gray-50 border rounded-md p-3 overflow-auto">
+              {prettyJson(detailsFor.provider_response)}
+            </pre>
+          ) : (
+            <div className="text-sm text-gray-600">No provider response available.</div>
+          )
+        )}
+      </Modal>
     </div>
   );
 }
