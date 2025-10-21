@@ -69,7 +69,6 @@ type PublishLog = {
   provider_post_id: string | null;
   publicUrl: string | null;
   final_status?: string | null;
-  provider_response?: unknown | null; // <-- add for on-demand modal
 };
 
 type Row = {
@@ -96,35 +95,6 @@ function effectiveLogStatus(
   if (!log) return "queued";
   if (log.final_status) return normalizeStatus(log.final_status);
   return (log.status as any) ?? "queued";
-}
-
-/* ============== provider_response JSON helpers + modal ============== */
-function toObject(x: unknown): any {
-  if (x == null) return null;
-  if (typeof x === "string") { try { return JSON.parse(x); } catch { return { raw: x }; } }
-  return x;
-}
-function prettyJson(x: unknown): string {
-  const o = toObject(x);
-  try { return JSON.stringify(o, null, 2); } catch { return String(x ?? ""); }
-}
-
-function Modal({
-  open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" aria-modal="true" role="dialog" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div className="relative z-10 w-[min(900px,92vw)] max-h-[85vh] bg-white rounded-xl shadow-lg border p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button onClick={onClose} className="px-3 py-1.5 rounded-md border border-gray-300 hover:bg-gray-100">Close</button>
-        </div>
-        <div className="overflow-auto">{children}</div>
-      </div>
-    </div>
-  );
 }
 
 /* ========================= The Logs Page ========================= */
@@ -156,12 +126,6 @@ export default function AllPublishedLogs() {
   const [toDate, setToDate] = useState<string>(urlTo);
 
   const titleLabel = validContext === "all" ? "All" : ucfirst(validContext);
-
-  // Modal state (per-row provider_response)
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [detailsRow, setDetailsRow] = useState<Row | null>(null);
-  const [detailsLoading, setDetailsLoading] = useState(false);
-  const [detailsErr, setDetailsErr] = useState<string | null>(null);
 
   /* ------------------------ Load one page of gens ------------------------ */
   async function loadPage(p: number) {
@@ -240,6 +204,7 @@ export default function AllPublishedLogs() {
     return () => {
       cancel = true;
     };
+    // re-run when the context changes
   }, [customerId, validContext]);
 
   /* ------------------------------ Load more ------------------------------ */
@@ -375,53 +340,6 @@ export default function AllPublishedLogs() {
     });
   }, [rows, fromTs, toTs]);
 
-  /* ------------------------ On-demand provider_response modal ------------------------ */
-  async function openDetails(row: Row) {
-    setDetailsOpen(true);
-    setDetailsErr(null);
-
-    // If we already have provider_response, show immediately
-    if (row.log.provider_response != null) {
-      setDetailsRow(row);
-      setDetailsLoading(false);
-      return;
-    }
-
-    // Otherwise fetch the latest matching log for this gen/platform/type
-    setDetailsLoading(true);
-    try {
-      const qs = new URLSearchParams({
-        content_generation_id: String(row.gen.id),
-        platform: row.log.platform,
-        post_type: row.log.post_type,
-      }).toString();
-
-      const resp = await api<any>(`/publish/logs/latest?${qs}`);
-      const latest = resp?.data ?? resp;
-
-      const mergedLog: PublishLog = {
-        ...row.log,
-        provider_response: latest?.provider_response ?? null,
-        publicUrl: row.log.publicUrl ?? latest?.publicUrl ?? null, // opportunistic sync
-      };
-      const mergedRow: Row = { ...row, log: mergedLog };
-
-      setDetailsRow(mergedRow);
-
-      // Patch it back into rows for instant re-open
-      setRows(prev =>
-        prev.map(r =>
-          r.gen.id === row.gen.id && r.log.id === row.log.id ? mergedRow : r
-        )
-      );
-    } catch (e: any) {
-      setDetailsErr(e?.message || "Failed to load provider response");
-      setDetailsRow(row);
-    } finally {
-      setDetailsLoading(false);
-    }
-  }
-
   /* --------------------------------- UI --------------------------------- */
   return (
     <div className="min-h-screen bg-white p-6">
@@ -450,7 +368,7 @@ export default function AllPublishedLogs() {
       <div className="mb-4 p-3 border rounded-lg bg-gray-50 flex flex-wrap items-end gap-3">
         <div>
           <label className="block text-xs text-gray-600 mb-1">From</label>
-        <input
+          <input
             type="date"
             className="px-3 py-2 border rounded-md bg-white"
             value={fromDate}
@@ -555,28 +473,18 @@ export default function AllPublishedLogs() {
                     {r.log.platform.replace(/_/g, " ")}
                   </td>
                   <td className="px-3 py-2 align-top">{ucfirst(r.log.post_type)}</td>
-
-                  {/* Status: clickable underlined pill to open modal */}
                   <td className="px-3 py-2 align-top">
-                    <button
-                      onClick={() => openDetails(r)}
-                      title="View provider response"
-                      className={`cursor-pointer inline-flex items-center px-2 py-0.5 rounded transition
-                        underline underline-offset-2
-                        ${eff === "posted"
-                          ? "text-green-700 bg-green-100 hover:bg-green-200"
-                          : eff === "failed"
-                          ? "text-red-700 bg-red-100 hover:bg-red-200"
-                          : "text-amber-700 bg-amber-100 hover:bg-amber-200"}`}
-                    >
-                      {eff === "posted" ? "Published" : eff === "failed" ? "Failed" : "Queued"}
-                    </button>
-
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded ${badge}`}>
+                      {eff === "posted"
+                        ? "Published"
+                        : eff === "failed"
+                        ? "Failed"
+                        : "Queued"}
+                    </span>
                     {r.checking && (
                       <span className="ml-2 text-xs text-gray-500">checking…</span>
                     )}
                   </td>
-
                   <td className="px-3 py-2 align-top">{fmt(r.log.posted_on)}</td>
                   <td className="px-3 py-2 align-top">
                     {r.log.publicUrl ? (
@@ -603,7 +511,6 @@ export default function AllPublishedLogs() {
                       {r.lastRawStatus && <> · raw: {r.lastRawStatus}</>}
                     </div>
                   </td>
-
                   <td className="px-3 py-2 align-top">
                     <div className="flex items-center gap-2">
                       <button
@@ -652,30 +559,6 @@ export default function AllPublishedLogs() {
           </button>
         </div>
       </div>
-
-      {/* Provider response modal */}
-      <Modal
-        open={detailsOpen}
-        onClose={() => setDetailsOpen(false)}
-        title={
-          detailsRow
-            ? `Provider Response · Gen #${detailsRow.gen.id} · ${detailsRow.log.platform} (${detailsRow.log.post_type})`
-            : "Provider Response"
-        }
-      >
-        {detailsLoading && <div className="text-sm text-gray-600">Loading…</div>}
-        {detailsErr && <div className="text-sm text-red-600 mb-2">{detailsErr}</div>}
-
-        {!detailsLoading && !detailsErr && (
-          detailsRow?.log?.provider_response ? (
-            <pre className="text-xs bg-gray-50 border rounded-md p-3 overflow-auto">
-              {prettyJson(detailsRow.log.provider_response)}
-            </pre>
-          ) : (
-            <div className="text-sm text-gray-600">No provider response available.</div>
-          )
-        )}
-      </Modal>
     </div>
   );
 }
