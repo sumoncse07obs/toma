@@ -1,4 +1,4 @@
-// src/components/customer/PublishLogs.tsx
+// src/components/customer/PostLogs.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -91,7 +91,7 @@ function Modal({
   );
 }
 
-export default function PublishLogs() {
+export default function PostLogs() {
   const { id } = useParams<{ id: string }>();
   const postId = Number(id);
   const navigate = useNavigate();

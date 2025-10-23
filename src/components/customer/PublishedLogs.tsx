@@ -1,7 +1,8 @@
-// src/components/customer/AllPublishedLogs.tsx
+// src/components/customer/PublishedLogs.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { currentUser } from "@/auth";
+import { toast } from "react-toastify";
 
 /* ========================= API base (reused) ========================= */
 const RAW_BASE = String(import.meta.env.VITE_API_BASE || "").replace(/\/+$/g, "");
@@ -38,7 +39,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (ct.includes("application/json") ? await res.json() : (undefined as any)) as T;
 }
 
-function getCustomerId(): number {
+function getCustomerIdFallback(): number {
   const u: any = currentUser?.() ?? null;
   return (
     u?.customer_id ??
@@ -69,8 +70,8 @@ type PublishLog = {
   provider_post_id: string | null;
   publicUrl: string | null;
   final_status?: string | null;
+  provider_response?: unknown | null;
 };
-
 type Row = {
   gen: ContentGeneration;
   log: PublishLog;
@@ -78,6 +79,7 @@ type Row = {
   lastCheckedAt?: number | null;
   lastRawStatus?: string | null;
 };
+type MeResponse = { data?: { id?: number; customer_id?: number } | null };
 
 /* ============== Normalize/derive status ============== */
 function normalizeStatus(
@@ -97,10 +99,39 @@ function effectiveLogStatus(
   return (log.status as any) ?? "queued";
 }
 
+/* ============== provider_response JSON helpers + modal ============== */
+function toObject(x: unknown): any {
+  if (x == null) return null;
+  if (typeof x === "string") { try { return JSON.parse(x); } catch { return { raw: x }; } }
+  return x;
+}
+function prettyJson(x: unknown): string {
+  const o = toObject(x);
+  try { return JSON.stringify(o, null, 2); } catch { return String(x ?? ""); }
+}
+
+function Modal({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" aria-modal="true" role="dialog" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative z-10 w-[min(900px,92vw)] max-h-[85vh] bg-white rounded-xl shadow-lg border p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md border border-gray-300 hover:bg-gray-100">Close</button>
+        </div>
+        <div className="overflow-auto">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 /* ========================= The Logs Page ========================= */
 const VALID_CONTEXTS = new Set(["all", "blog", "youtube", "launch", "topic"]);
 
-export default function AllPublishedLogs() {
+export default function PublishedLogs() {
   const { context: ctxParam } = useParams<{ context?: string }>();
   const context = ctxParam?.toLowerCase() ?? "all";
   const validContext = VALID_CONTEXTS.has(context) ? context : "all";
@@ -108,7 +139,6 @@ export default function AllPublishedLogs() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const customerId = useMemo(() => getCustomerId(), []);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -127,18 +157,61 @@ export default function AllPublishedLogs() {
 
   const titleLabel = validContext === "all" ? "All" : ucfirst(validContext);
 
+  // Modal state
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsRow, setDetailsRow] = useState<Row | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsErr, setDetailsErr] = useState<string | null>(null);
+
+  // Customer
+  const [customerId, setCustomerId] = useState<number | null>(null);
+  const [customerErr, setCustomerErr] = useState<string | null>(null);
+  const [customerLoading, setCustomerLoading] = useState(true);
+
+  // ✅ Resolve customer_id first, then fetch data (prevents ?customer_id=null)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setCustomerLoading(true);
+      setCustomerErr(null);
+      try {
+        // Prefer server source
+        const me = await api<MeResponse>("/customers/me");
+        const cid = me?.data?.customer_id ?? null;
+        const resolved = cid ?? getCustomerIdFallback();
+        if (!cancelled) setCustomerId(Number(resolved));
+      } catch (e: any) {
+        // Fallback to local currentUser if /customers/me fails
+        const fallback = getCustomerIdFallback();
+        if (!fallback) {
+          if (!cancelled)
+            setCustomerErr(
+              "Could not determine customer_id. Make sure you're logged in and /customers/me is protected."
+            );
+        } else {
+          if (!cancelled) setCustomerId(Number(fallback));
+        }
+      } finally {
+        if (!cancelled) setCustomerLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   /* ------------------------ Load one page of gens ------------------------ */
   async function loadPage(p: number) {
+    if (customerId == null) {
+      // Guard so we never hit the API with ?customer_id=null
+      throw new Error("Customer not resolved yet");
+    }
     const qs = new URLSearchParams({
       customer_id: String(customerId),
       page: String(p),
       per_page: String(perPage),
     });
     if (validContext !== "all") {
-      // Backend should accept ?prompt_for=blog|youtube|launch|topic
       qs.set("prompt_for", validContext);
     }
-
     const out = await api<any>(`/content-generations?${qs.toString()}`);
     const raw: any[] = out?.data ?? out ?? [];
 
@@ -169,13 +242,19 @@ export default function AllPublishedLogs() {
     return js?.data ?? [];
   }
 
-  /* ----------------------------- Initial load ----------------------------- */
+  /* ----------------------------- Initial + context load ----------------------------- */
   useEffect(() => {
+    // Don’t start until customerId is known
+    if (customerId == null) return;
+
     let cancel = false;
     (async () => {
       setLoading(true);
       setErr(null);
       try {
+        // reset when customer/context changes
+        setRows([]);
+        setPage(1);
         const gens = await loadPage(1);
         if (cancel) return;
 
@@ -194,7 +273,6 @@ export default function AllPublishedLogs() {
         }
         if (cancel) return;
         setRows(rowsBuilt);
-        setPage(1);
       } catch (e: any) {
         if (!cancel) setErr(e?.message || "Failed to load logs");
       } finally {
@@ -204,11 +282,11 @@ export default function AllPublishedLogs() {
     return () => {
       cancel = true;
     };
-    // re-run when the context changes
   }, [customerId, validContext]);
 
   /* ------------------------------ Load more ------------------------------ */
   async function loadMore() {
+    if (customerId == null) return;
     const next = page + 1;
     setLoading(true);
     try {
@@ -236,6 +314,14 @@ export default function AllPublishedLogs() {
   }
 
   /* ------------------------ Manual status check (one) ------------------------ */
+  function updateRow(idx: number, patch: Partial<Row>) {
+    setRows((prev) => {
+      const cp = [...prev];
+      if (!cp[idx]) return prev;
+      cp[idx] = { ...cp[idx], ...patch };
+      return cp;
+    });
+  }
   async function checkOne(rowIdx: number) {
     setRows((prev) => {
       const cp = [...prev];
@@ -274,21 +360,14 @@ export default function AllPublishedLogs() {
       });
     }
   }
-  function updateRow(idx: number, patch: Partial<Row>) {
-    setRows((prev) => {
-      const cp = [...prev];
-      if (!cp[idx]) return prev;
-      cp[idx] = { ...cp[idx], ...patch };
-      return cp;
-    });
-  }
 
-  /* ---------------------- Auto-refresh queued statuses (always on) ---------------------- */
+  /* ---------------------- Auto-refresh queued statuses ---------------------- */
   useEffect(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current as any);
       intervalRef.current = null;
     }
+    if (!rows.length) return;
 
     intervalRef.current = window.setInterval(async () => {
       for (let i = 0; i < rows.length; i++) {
@@ -331,7 +410,7 @@ export default function AllPublishedLogs() {
   const filteredRows = useMemo(() => {
     if (!fromTs && !toTs) return rows;
     return rows.filter((r) => {
-      if (!r.log?.posted_on) return false; // filter by posted_on
+      if (!r.log?.posted_on) return false;
       const t = new Date(r.log.posted_on).getTime();
       if (Number.isNaN(t)) return false;
       if (fromTs && t < fromTs) return false;
@@ -339,6 +418,49 @@ export default function AllPublishedLogs() {
       return true;
     });
   }, [rows, fromTs, toTs]);
+
+  /* ------------------------ On-demand provider_response modal ------------------------ */
+  async function openDetails(row: Row) {
+    setDetailsOpen(true);
+    setDetailsErr(null);
+
+    if (row.log.provider_response != null) {
+      setDetailsRow(row);
+      setDetailsLoading(false);
+      return;
+    }
+
+    setDetailsLoading(true);
+    try {
+      const qs = new URLSearchParams({
+        content_generation_id: String(row.gen.id),
+        platform: row.log.platform,
+        post_type: row.log.post_type,
+      }).toString();
+
+      const resp = await api<any>(`/publish/logs/latest?${qs}`);
+      const latest = resp?.data ?? resp;
+
+      const mergedLog: PublishLog = {
+        ...row.log,
+        provider_response: latest?.provider_response ?? null,
+        publicUrl: row.log.publicUrl ?? latest?.publicUrl ?? null,
+      };
+      const mergedRow: Row = { ...row, log: mergedLog };
+
+      setDetailsRow(mergedRow);
+      setRows(prev =>
+        prev.map(r =>
+          r.gen.id === row.gen.id && r.log.id === row.log.id ? mergedRow : r
+        )
+      );
+    } catch (e: any) {
+      setDetailsErr(e?.message || "Failed to load provider response");
+      setDetailsRow(row);
+    } finally {
+      setDetailsLoading(false);
+    }
+  }
 
   /* --------------------------------- UI --------------------------------- */
   return (
@@ -353,6 +475,12 @@ export default function AllPublishedLogs() {
             ) : null}
             .
           </div>
+          {customerLoading && (
+            <div className="text-xs text-gray-500 mt-1">Resolving customer…</div>
+          )}
+          {customerErr && (
+            <div className="text-xs text-red-600 mt-1">{customerErr}</div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -473,18 +601,28 @@ export default function AllPublishedLogs() {
                     {r.log.platform.replace(/_/g, " ")}
                   </td>
                   <td className="px-3 py-2 align-top">{ucfirst(r.log.post_type)}</td>
+
+                  {/* Status: clickable underlined pill to open modal */}
                   <td className="px-3 py-2 align-top">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded ${badge}`}>
-                      {eff === "posted"
-                        ? "Published"
-                        : eff === "failed"
-                        ? "Failed"
-                        : "Queued"}
-                    </span>
+                    <button
+                      onClick={() => openDetails(r)}
+                      title="View provider response"
+                      className={`cursor-pointer inline-flex items-center px-2 py-0.5 rounded transition
+                        underline underline-offset-2
+                        ${eff === "posted"
+                          ? "text-green-700 bg-green-100 hover:bg-green-200"
+                          : eff === "failed"
+                          ? "text-red-700 bg-red-100 hover:bg-red-200"
+                          : "text-amber-700 bg-amber-100 hover:bg-amber-200"}`}
+                    >
+                      {eff === "posted" ? "Published" : eff === "failed" ? "Failed" : "Queued"}
+                    </button>
+
                     {r.checking && (
                       <span className="ml-2 text-xs text-gray-500">checking…</span>
                     )}
                   </td>
+
                   <td className="px-3 py-2 align-top">{fmt(r.log.posted_on)}</td>
                   <td className="px-3 py-2 align-top">
                     {r.log.publicUrl ? (
@@ -511,6 +649,7 @@ export default function AllPublishedLogs() {
                       {r.lastRawStatus && <> · raw: {r.lastRawStatus}</>}
                     </div>
                   </td>
+
                   <td className="px-3 py-2 align-top">
                     <div className="flex items-center gap-2">
                       <button
@@ -559,6 +698,30 @@ export default function AllPublishedLogs() {
           </button>
         </div>
       </div>
+
+      {/* Provider response modal */}
+      <Modal
+        open={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        title={
+          detailsRow
+            ? `Provider Response · Gen #${detailsRow.gen.id} · ${detailsRow.log.platform} (${detailsRow.log.post_type})`
+            : "Provider Response"
+        }
+      >
+        {detailsLoading && <div className="text-sm text-gray-600">Loading…</div>}
+        {detailsErr && <div className="text-sm text-red-600 mb-2">{detailsErr}</div>}
+
+        {!detailsLoading && !detailsErr && (
+          detailsRow?.log?.provider_response ? (
+            <pre className="text-xs bg-gray-50 border rounded-md p-3 overflow-auto">
+              {prettyJson(detailsRow.log.provider_response)}
+            </pre>
+          ) : (
+            <div className="text-sm text-gray-600">No provider response available.</div>
+          )
+        )}
+      </Modal>
     </div>
   );
 }

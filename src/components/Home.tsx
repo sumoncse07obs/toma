@@ -18,6 +18,7 @@ export default function Home() {
     try {
       await login(email, password);            // ✅ real login only
       nav(getDashboardRoute(), { replace: true });
+      
     } catch (err: any) {
       setError(err?.message || "Login failed. Please try again.");
     } finally {

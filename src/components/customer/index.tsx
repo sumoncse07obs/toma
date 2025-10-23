@@ -20,7 +20,7 @@ import ListLaunchContents from "@/components/customer/launch_pages/ListLaunchCon
 import NewLaunchContents from "@/components/customer/launch_pages/NewLaunchContents";
 import ViewLaunchContents from "@/components/customer/launch_pages/ViewLaunchContents";
 
-import PublishLogs from "@/components/customer/PublishLogs";
+import PostLogs from "@/components/customer/PostLogs";
 import PublishPost from "@/components/customer/PublishPost";
 
 import PostToBlotato from "@/components/customer/PostToBlotato";
@@ -30,7 +30,7 @@ import SupportHome from "@/components/support/SupportHome";
 import NewSupportTicket from "@/components/support/NewSupportTicket";
 import ViewSupportTicket from "@/components/support/ViewSupportTicket";
 
-import AllPublishedLogs from "@/components/customer/AllPublishedLogs";
+import PublishedLogs from "@/components/customer/PublishedLogs";
 
 export default function CustomerRouter() {
   return (
@@ -45,7 +45,7 @@ export default function CustomerRouter() {
         <Route path="blog/list" element={<ListBlogContents />} />
         <Route path="blog/view/:id" element={<ViewBlogContents />} />
         <Route path="blog/new" element={<NewBlogContents />} />
-        <Route path="blog/log/:id" element={<PublishLogs />} />
+        <Route path="blog/log/:id" element={<PostLogs />} />
         <Route path="blog/post/:id" element={<PublishPost />} />
         <Route path="blog/posttoblotato/:id" element={<PostToBlotato />} />
 
@@ -53,6 +53,7 @@ export default function CustomerRouter() {
         <Route path="youtube/list" element={<ListYoutubeContents />} />
         <Route path="youtube/view/:id" element={<ViewYoutubeContents />} />
         <Route path="youtube/new" element={<NewYoutubeContents />} />
+        <Route path="youtube/log/:id" element={<PostLogs />} />
         <Route path="youtube/post/:id" element={<PublishPost />} />
         <Route path="youtube/posttoblotato/:id" element={<PostToBlotato />} />
 
@@ -60,6 +61,7 @@ export default function CustomerRouter() {
         <Route path="topic/list" element={<ListTopicContents />} />
         <Route path="topic/view/:id" element={<ViewTopicContents />} />
         <Route path="topic/new" element={<NewTopicContents />} />
+        <Route path="topic/log/:id" element={<PostLogs />} />
         <Route path="topic/post/:id" element={<PublishPost />} />
         <Route path="topic/posttoblotato/:id" element={<PostToBlotato />} />
 
@@ -67,13 +69,13 @@ export default function CustomerRouter() {
         <Route path="launch/list" element={<ListLaunchContents />} />
         <Route path="launch/view/:id" element={<ViewLaunchContents />} />
         <Route path="launch/new" element={<NewLaunchContents />} />
-        <Route path="launch/log/:id" element={<PublishLogs />} />
+        <Route path="launch/log/:id" element={<PostLogs />} />
         <Route path="launch/post/:id" element={<PublishPost />} />
         <Route path="launch/posttoblotato/:id" element={<PostToBlotato />} />
 
         {/* NEW: /customer/logs/all */}
-        <Route path="logs/all" element={<AllPublishedLogs />} />
-        <Route path="logs/:context" element={<AllPublishedLogs />} />
+        <Route path="logs/all" element={<PublishedLogs />} />
+        <Route path="logs/:context" element={<PublishedLogs />} />
 
         {/* Profile & Support */}
         <Route path="profile" element={<Portfolio />} />
