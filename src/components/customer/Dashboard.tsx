@@ -3,6 +3,9 @@ import React from "react";
 import { Link } from "react-router-dom";
 
 export default function Dashboard() {
+
+  const businessName = localStorage.getItem("business_name");
+
   return (
     <div className="mx-auto w-full max-w-6xl flex flex-col justify-between h-full">
       {/* HERO */}
@@ -13,9 +16,11 @@ export default function Dashboard() {
         <p className="text-xl md:text-2xl font-bold text-slate-700 mt-1">
           Top Of Mind Automation
         </p>
-        <p className="text-slate-600 mt-10">
-          Graphic or text reminding what it’s for
-        </p>
+        {businessName && (
+          <p className="text-lg text-slate-700 mt-2">
+            Company: <span className="font-semibold">{businessName}</span>
+          </p>
+        )}
       </section>
 
       {/* ACTION BUTTONS */}

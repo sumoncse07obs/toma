@@ -107,6 +107,7 @@ export default function NewBlogContents() {
   const navigate = useNavigate();
 
   const [customerId, setCustomerId] = useState<number | null>(null);
+  const businessName = localStorage.getItem("business_name");
 
   useEffect(() => {
     // Fetch customerId when component mounts
@@ -343,6 +344,11 @@ export default function NewBlogContents() {
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-10 px-4">
+      {businessName && (
+        <p className="text-lg text-slate-700 mt-2">
+          Company: <span className="font-semibold">{businessName}</span>
+        </p>
+      )}
       <h1 className="text-xl font-semibold mb-6">
         Toma <span className="font-bold">{titleNoun}</span> Automation
       </h1>

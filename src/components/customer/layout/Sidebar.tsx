@@ -17,6 +17,8 @@ const navItems = [
   { to: "/customer/youtube/list", label: "YouTube Automation", icon: "▶️" },
   { to: "/customer/topic/list", label: "Topic Automation", icon: "📚" },
   { to: "/customer/launch/list", label: "Launch Automation", icon: "🚀" },
+  { to: "/customer/tips", label: "Tips & Tricks", icon: "💡" },
+  { to: "/customer/training",    label: "Training Videos",    icon: "🎥" },
 ];
 
 export default function Sidebar({

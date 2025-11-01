@@ -1,18 +1,31 @@
 // src/components/customer/lib/customer.tsx
-import { apiCall } from "@/auth"; // reuse your single API helper
+import { apiCall } from "@/auth";
 
 export type CustomerMe = {
   customer_number?: string | null;
-  // add more fields here if you need later
+  customer?: {
+    customer_number?: string | null;
+    business_name?: string | null;
+  };
 };
 
-// Safe call that returns undefined for non-customers (call-site will guard)
+// Keep the same name, same behavior, just include businessName too
 export async function getCustomerNumber(): Promise<string | undefined> {
   try {
-    // Your API may return { data: {...} } or the object directly
     const res = await apiCall("/customers/me");
-    const data: CustomerMe = (res?.data ?? res) || {};
-    return (res?.data?.customer_number ?? data?.customer_number) || undefined;
+    const data: CustomerMe = res?.data ?? res;
+    const number =
+      data?.customer_number ??
+      data?.customer?.customer_number ??
+      undefined;
+
+    // 💡 Store business_name in localStorage for global reuse
+    const businessName = data?.customer?.business_name;
+    if (businessName) {
+      localStorage.setItem("business_name", businessName);
+    }
+
+    return number;
   } catch {
     return undefined;
   }
