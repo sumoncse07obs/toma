@@ -296,10 +296,10 @@ export default function PublishPost() {
   }, [pathname]);
 
   const TITLE_BY_CONTEXT: Record<typeof context, string> = {
-    blog: "Toma Blog Automation",
-    youtube: "Toma YouTube Automation",
-    topic: "Toma Topic Automation",
-    launch: "Toma Launch Automation",
+    blog: "Tomaa Blog Automation",
+    youtube: "Tomaa YouTube Automation",
+    topic: "Tomaa Topic Automation",
+    launch: "Tomaa Launch Automation",
   };
 
   const [loading, setLoading] = useState(true);
