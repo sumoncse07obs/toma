@@ -11,7 +11,7 @@ export default function Dashboard() {
       {/* HERO */}
       <section className="text-center mt-6">
         <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-          Welcome To Toma
+          Welcome To Tomaa
         </h2>
         <p className="text-xl md:text-2xl font-bold text-slate-700 mt-1">
           Top Of Mind Automation
