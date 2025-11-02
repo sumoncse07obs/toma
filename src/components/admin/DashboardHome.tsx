@@ -8,7 +8,7 @@ export default function DashboardHome() {
       {/* HERO */}
       <section className="text-center mt-6">
         <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-          Welcome To Toma
+          Welcome To Tomaa
         </h2>
       </section>
 
