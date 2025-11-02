@@ -50,7 +50,7 @@ export default function Home() {
           {/* Hero / copy */}
           <section className="order-1 flex flex-col justify-center gap-4 text-white">
             <span className="inline-flex w-fit items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs sm:text-sm">
-              <strong className="font-semibold">TOMA</strong>
+              <strong className="font-semibold"> TOMAA </strong>
               <span className="opacity-80">Social Automation</span>
             </span>
 
