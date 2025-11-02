@@ -2,6 +2,7 @@
 import React from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { login, getDashboardRoute } from "@/auth";
+import Topnav from "@/components/Topnav";
 
 export default function Home() {
   const nav = useNavigate();
@@ -28,6 +29,7 @@ export default function Home() {
 
   return (
     <div className="relative min-h-[100svh] overflow-hidden">
+      <Topnav />
       {/* Background image (no fixed on mobile to avoid jank) */}
       <div
         className="absolute inset-0 bg-[url('/social-automation-bg2.jpg')] bg-cover bg-center md:bg-fixed"
