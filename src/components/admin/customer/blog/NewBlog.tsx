@@ -372,7 +372,7 @@ export default function NewBlog() {
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-10 px-4">
       <h1 className="text-xl font-semibold mb-6">
-        Toma <span className="font-bold">{titleNoun}</span> Automation
+        Tomaa <span className="font-bold">{titleNoun}</span> Automation
       </h1>
 
       {/* Debug: show detected customer id */}

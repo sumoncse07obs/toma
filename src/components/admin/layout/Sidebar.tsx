@@ -60,7 +60,7 @@ export default function Sidebar({ open, setOpen, collapsed, setCollapsed }: Prop
         {/* Brand clickable to /admin */}
         <Link to="/admin" className="flex items-center gap-2">
           <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 to-sky-400" />
-          {!collapsed && <span className="font-semibold">TOMA</span>}
+          {!collapsed && <span className="font-semibold">TOMAA</span>}
         </Link>
 
         {/* Collapse toggle */}
