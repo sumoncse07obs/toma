@@ -1,7 +1,6 @@
 // src/components/customer/PublishPost.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { currentUser } from "@/auth";
 
 type PostType = "text" | "image" | "video";
 type PreviewSize = "sm" | "md" | "lg";
@@ -192,7 +191,7 @@ const FIELD_MAP: Record<string, { text: FieldKeys; image: FieldKeys; video: Fiel
 const isPlayableVideo = (url?: string | null) =>
   !!url && /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url);
 
-/* ===== NEW: blotato host check ===== */
+/* ===== blotato host check ===== */
 function isBlotatoHosted(u?: string | null) {
   if (!u) return false;
   try {
@@ -267,6 +266,7 @@ type CustomerSettings = {
   // NOTE: API uses "linkeidin" spelling
   blotato_linkeidin_id?: string | null;
   blotato_linkeidin_page_ids?: string[] | string | null;
+  blotato_linkeidin_active?: boolean | null; // NEW toggle
 
   blotato_youtube_id?: string | null;
   blotato_pinterest_id?: string | null;
@@ -366,22 +366,22 @@ export default function PublishPost() {
   const [customerId, setCustomerId] = useState<number | null>(null);
 
   // Build "convert" link from record.prompt_for (fallback to context) + id
-const promptFor = (record as any)?.prompt_for || context; // 'blog' | 'topic' | 'youtube' | 'launch'
-const genId = record?.id ?? (id ? parseInt(id, 10) : null);
+  const promptFor = (record as any)?.prompt_for || context; // 'blog' | 'topic' | 'youtube' | 'launch'
+  const genId = record?.id ?? (id ? parseInt(id, 10) : null);
 
-// detect if you're under /customer/* (most of your screens are)
-const isCustomerRoute = pathname.toLowerCase().includes("/customer/");
-const rootPrefix = isCustomerRoute ? "/customer" : "";
+  // detect if you're under /customer/* (most of your screens are)
+  const isCustomerRoute = pathname.toLowerCase().includes("/customer/");
+  const rootPrefix = isCustomerRoute ? "/customer" : "";
 
-// ABSOLUTE path so it doesn't append to the current URL
-const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` : "#";
+  // ABSOLUTE path so it doesn't append to the current URL
+  const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` : "#";
 
   useEffect(() => {
     // Fetch customerId when component mounts
     const fetchCustomerId = async () => {
       try {
-        const id = await getCustomerIdFromAuth();
-        setCustomerId(id);
+        const idNum = await getCustomerIdFromAuth();
+        setCustomerId(idNum);
       } catch (error) {
         console.error("Failed to fetch customer ID:", error);
       }
@@ -539,7 +539,7 @@ const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` 
     };
   }, [customerId]);
 
-  // Enabled platforms
+  // Enabled platforms (LinkedIn Personal respects blotato_linkeidin_active toggle)
   const enabled = useMemo(() => {
     const s = settings || {};
 
@@ -549,8 +549,9 @@ const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` 
     const xOn = hasId(s.blotato_twitter_id);
     const tiktokOn = hasId(s.blotato_tiktok_id);
 
-    // Split LinkedIn into Personal (member) vs Business (page)
-    const linkedinPersonalOn = hasId(s.blotato_linkeidin_id);
+    // Gate personal by toggle; default true if undefined for backward compat
+    const linkedinActive = s.blotato_linkeidin_active === undefined ? true : !!s.blotato_linkeidin_active;
+    const linkedinPersonalOn = linkedinActive && hasId(s.blotato_linkeidin_id);
     const linkedinPageOn = hasId(s.blotato_linkeidin_page_ids);
 
     const youtubeShortOn = hasId(s.blotato_youtube_id);
@@ -838,7 +839,7 @@ const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` 
     };
   }, [lastSubmissionId, publishStatus]);
 
-  /* ===== NEW: flag when current media is NOT hosted on Blotato ===== */
+  /* ===== flag when current media is NOT hosted on Blotato ===== */
   const nonBlotatoMedia = useMemo(() => {
     const pt = effectivePostType;
     if (pt === "image") {
@@ -860,8 +861,8 @@ const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` 
     if (nonBlotatoMedia) {
       setApproveStatus("error");
       setApproveError(
-         "This image format isn’t supported. Please use the image conversion tool — once it’s done, start using the new URL."
-        );
+        "This image format isn’t supported. Please use the image conversion tool — once it’s done, start using the new URL."
+      );
       return;
     }
 
@@ -952,7 +953,7 @@ const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` 
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-8 px-4">
-      {/* ====== Overlay while we wait for final status ====== */}
+      {/* Overlay while we wait for final status (off) */}
       {showStatusOverlay && (
         <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] flex items-center justify-center">
           <div className="bg-white rounded-xl shadow-2xl p-6 w-80 text-center">
@@ -1011,7 +1012,7 @@ const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` 
         )}
       </div>
 
-      {/* ===== NEW: small hint if video is non-Blotato and posting video ===== */}
+      {/* small hint if video is non-Blotato and posting video */}
       {effectivePostType === "video" &&
         (videoUrl || record?.video_url) &&
         !isBlotatoHosted((videoUrl || record?.video_url || "").trim()) && (
@@ -1023,8 +1024,7 @@ const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` 
               </a>
             )}
           </div>
-      )}
-
+        )}
 
       {/* Main content */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
@@ -1124,7 +1124,7 @@ const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` 
 
         {/* Right: actions + STATUS PANEL */}
         <div className="flex flex-col justify-between space-y-4">
-          {/* ===== NEW: Banner when media is not hosted on Blotato ===== */}
+          {/* Banner when media is not hosted on Blotato */}
           {nonBlotatoMedia && (
             <div className="w-full rounded-md border border-red-300 bg-red-50 text-red-700 p-3 text-sm">
               This image format isn’t supported. Please use the image conversion tool — once it’s done, start using the new URL.&nbsp;
@@ -1135,7 +1135,6 @@ const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` 
               )}
             </div>
           )}
-
 
           <button
             className="w-full bg-orange-500 text-white py-2 rounded-md hover:bg-orange-600"
@@ -1221,9 +1220,7 @@ const convertHref = genId ? `${rootPrefix}/${promptFor}/posttoblotato/${genId}` 
           <div className="min-h-5 text-xs">
             {approveStatus === "posted" && <span className="text-green-600">Submitted to Blotato.</span>}
             {approveStatus === "error" && (
-              <span className="text-red-600">
-                Publish failed{approveError ? `: ${approveError}` : ""}
-              </span>
+              <span className="text-red-600">Publish failed{approveError ? `: ${approveError}` : ""}</span>
             )}
             {publishStatus === "queued" && (
               <span className="text-amber-600">Processing on the platform… video posts may take 1–3 minutes.</span>

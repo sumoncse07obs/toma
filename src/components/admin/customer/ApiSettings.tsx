@@ -20,6 +20,9 @@ type Settings = {
 
   blotato_facebook_page_ids?: string[] | null;
   blotato_linkeidin_page_ids?: string[] | null; // keep current backend key
+
+  // NEW: LinkedIn on/off for frontend usage
+  blotato_linkeidin_active?: boolean | null;
 };
 
 type CustomerMeta = {
@@ -80,6 +83,14 @@ function arrayToText(arr?: string[] | null): string {
   return (arr ?? []).join(", ");
 }
 
+// Normalize various backend shapes (0/1, "true"/"false", etc.) to boolean
+function toBool(v: any): boolean {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  if (typeof v === "string") return ["1", "true", "yes", "on"].includes(v.toLowerCase());
+  return false;
+}
+
 /** Get customer id from route patterns */
 function useCustomerId(): number | null {
   const params = useParams();
@@ -125,7 +136,7 @@ export default function ApiSettings() {
   const [fbPagesText, setFbPagesText] = React.useState("");
   const [liPagesText, setLiPagesText] = React.useState("");
 
-  // NEW: Customer meta (number + name)
+  // Customer meta (number + name)
   const [customer, setCustomer] = React.useState<CustomerMeta | null>(null);
 
   // Single source of truth for invalid id -> show toast once via effect
@@ -169,7 +180,11 @@ export default function ApiSettings() {
 
         // Settings
         if (settingsRes.status === "fulfilled") {
-          const data: Settings = settingsRes.value?.data ?? settingsRes.value ?? {};
+          const raw: Settings = settingsRes.value?.data ?? settingsRes.value ?? {};
+          const data: Settings = {
+            ...raw,
+            blotato_linkeidin_active: toBool(raw.blotato_linkeidin_active),
+          };
           setForm(data);
           setFbPagesText(arrayToText(data.blotato_facebook_page_ids));
           setLiPagesText(arrayToText(data.blotato_linkeidin_page_ids));
@@ -192,7 +207,7 @@ export default function ApiSettings() {
         if (customerRes.status === "fulfilled") {
           const c: CustomerMeta = customerRes.value?.data ?? customerRes.value ?? null;
           if (c) setCustomer(c);
-        } // if it fails, we silently ignore and fall back to id in UI
+        }
       } finally {
         if (!alive) return;
         setLoading(false);
@@ -223,6 +238,9 @@ export default function ApiSettings() {
       ...form,
       blotato_facebook_page_ids: textToIdArray(fbPagesText),
       blotato_linkeidin_page_ids: textToIdArray(liPagesText),
+
+      // If backend prefers booleans, this is fine. If it needs 0/1, convert here.
+      blotato_linkeidin_active: !!form.blotato_linkeidin_active,
     };
 
     try {
@@ -305,16 +323,16 @@ export default function ApiSettings() {
     </div>
   );
 
-  // Friendly header line
+  // Friendly header line (optional to render)
   const displayNumber = customer?.customer_number ?? `${customerId}`;
   const displayName = customer?.business_name || customer?.user?.name || "—";
 
   return (
     <div className="max-w-3xl mx-auto p-6">
       <h1 className="text-2xl font-semibold mb-1">Integration Settings</h1>
-
-
-      {/* No inline banners; toasts only */}
+      <p className="text-sm text-slate-500 mb-6">
+        Customer #{displayNumber} • {displayName}
+      </p>
 
       <div className="grid grid-cols-1 gap-6">
         {/* API Keys */}
@@ -328,8 +346,53 @@ export default function ApiSettings() {
         {/* Blotato Account IDs */}
         <section className="rounded-xl border p-4">
           <h2 className="font-medium mb-3">Blotato Account IDs</h2>
+
           {textInput("Twitter ID", "blotato_twitter_id")}
-          {textInput("LinkedIn ID", "blotato_linkeidin_id")}
+
+          {/* LinkedIn ID + Active toggle */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between gap-3">
+              <label className="block text-sm font-medium mb-1">LinkedIn ID</label>
+
+              {/* Toggle switch */}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!!form.blotato_linkeidin_active}
+                onClick={() =>
+                  setForm((f) => ({
+                    ...f,
+                    blotato_linkeidin_active: !toBool(f.blotato_linkeidin_active),
+                  }))
+                }
+                className={[
+                  "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200",
+                  !!form.blotato_linkeidin_active ? "bg-emerald-500" : "bg-slate-300",
+                ].join(" ")}
+                title={!!form.blotato_linkeidin_active ? "LinkedIn: Active" : "LinkedIn: Inactive"}
+              >
+                <span
+                  className={[
+                    "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200",
+                    !!form.blotato_linkeidin_active ? "translate-x-5" : "translate-x-0",
+                  ].join(" ")}
+                />
+              </button>
+            </div>
+
+            <input
+              type="text"
+              className="mt-2 w-full rounded-md border px-3 py-2"
+              value={form.blotato_linkeidin_id || ""}
+              onChange={onChange("blotato_linkeidin_id")}
+              placeholder="urn:li:person:..., or account ID"
+            />
+
+            <p className="mt-1 text-xs text-slate-500">
+              Status: {form.blotato_linkeidin_active ? "Active (shown/used on frontend)" : "Inactive (hidden/ignored on frontend)"}
+            </p>
+          </div>
+
           {textInput("Facebook ID", "blotato_facebook_id")}
           {textInput("TikTok ID", "blotato_tiktok_id")}
           {textInput("Instagram ID", "blotato_instagram_id")}
