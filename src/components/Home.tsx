@@ -57,7 +57,7 @@ export default function Home() {
             </span>
 
             <h1 className="max-w-2xl text-[clamp(1.8rem,5.5vw,3.5rem)] font-extrabold leading-tight tracking-tight">
-              Automate posts. <span className="text-sky-400">Stay top-of-mind.</span>
+              Generate and Automate Posts <span className="text-sky-400">Stay top-of-mind.</span>
             </h1>
 
             <p className="max-w-xl text-sm sm:text-base text-slate-200">

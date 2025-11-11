@@ -5,8 +5,8 @@ export default function Topnav() {
   const { pathname } = useLocation();
 
   const navItems = [
-    { name: "Blog", to: "/blog" },
-    { name: "Contact Us", to: "/contact" },
+    { name: "Learning Center", to: "https://tomaa.tech/learning-center" },
+    { name: "Contact Us", to: "https://tomaa.tech/contact-us" },
   ];
 
   return (
@@ -14,7 +14,7 @@ export default function Topnav() {
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
         {/* Logo / Brand */}
         <Link
-          to="/"
+          to="https://tomaa.tech/"
           className="text-white text-lg font-bold tracking-tight hover:text-sky-400 transition"
         >
           TOMA<span className="text-sky-400">A</span>
